@@ -10,7 +10,9 @@ async function main() {
   const config = loadConfig();
   const sheetsClient = await SheetsClient.create({
     spreadsheetId: config.google.spreadsheetId,
-    serviceAccountJson: config.google.serviceAccountJson
+    serviceAccountJson: config.google.serviceAccountJson,
+    scriptWebAppUrl: config.google.scriptWebAppUrl,
+    scriptSharedSecret: config.google.scriptSharedSecret
   });
   const repository = new Repository(sheetsClient);
   const opsService = new OpsService({ repository, slackClient: null, config });
