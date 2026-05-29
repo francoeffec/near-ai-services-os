@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: near-ai-services-os
+    env: docker
+    plan: starter
+    autoDeploy: true
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: GOOGLE_SPREADSHEET_ID
+        sync: false
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: SLACK_BOT_TOKEN
+        sync: false
+      - key: SLACK_SIGNING_SECRET
+        sync: false
+      - key: SLACK_AI_LEADS_CHANNEL_ID
+        sync: false
+      - key: SLACK_HANDOFF_CHANNEL_ID
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: WEBHOOK_SHARED_SECRET
+        sync: false
+      - key: ADMIN_TOKEN
+        sync: false
+      - key: SMARTLEAD_API_KEY
+        sync: false
