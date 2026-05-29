@@ -1,0 +1,247 @@
+const { SHEETS } = require("../schema");
+const { extractCallFields } = require("../ai/extract");
+const { generateHandoffMessage } = require("../domain/handoff");
+const { cleanText, entityKey, firstNonEmpty, nowIso, stableId } = require("../domain/normalize");
+
+class OpsService {
+  constructor({ repository, slackClient, config }) {
+    this.repository = repository;
+    this.slackClient = slackClient;
+    this.config = config;
+  }
+
+  async canonicalOwner(owner) {
+    const requested = cleanText(owner);
+    if (!requested) return "";
+    try {
+      const configTable = await this.repository.read(SHEETS.config);
+      const match = configTable.rows.find((row) => {
+        if (row.Type !== "owner_alias") return false;
+        return [row.Key, row.Value, row["Slack User ID"]]
+          .map((value) => cleanText(value).toLowerCase())
+          .includes(requested.toLowerCase());
+      });
+      return match ? match.Value : requested;
+    } catch (_error) {
+      return requested;
+    }
+  }
+
+  async addLead(input) {
+    const key = entityKey(input);
+    if (!key || key === "|") {
+      throw new Error("A lead needs at least a company, company domain, or contact email.");
+    }
+    const owner = await this.canonicalOwner(input.owner || input.Owner);
+    const row = {
+      "Entity Key": key,
+      Company: input.company || input.Company,
+      "Company Domain": input.companyDomain || input["Company Domain"] || "",
+      "First Name": input.firstName || input["First Name"] || "",
+      "Last Name": input.lastName || input["Last Name"] || "",
+      Email: input.email || input.Email || "",
+      Source: input.source || "Slack",
+      Campaign: input.campaign || "",
+      "Lead Stage": input.stage || input.leadStage || "Positive Response",
+      Owner: owner,
+      "Smartlead Campaign ID": input.campaignId || "",
+      "Smartlead Lead ID": input.smartleadLeadId || "",
+      "Last Reply At": input.lastReplyAt || "",
+      "Reply Summary": input.replySummary || "",
+      Notes: input.notes || "",
+      "Next Step": input.nextStep || "",
+      "Slack Thread": input.slackThread || "",
+      "Source Event ID": input.sourceEventId || input["Source Event ID"] || ""
+    };
+
+    const result = await this.repository.upsert(SHEETS.leads, "Entity Key", key, row, "Lead ID", "lead");
+    await this.repository.addEvent({
+      eventId: input.sourceEventId || stableId("event", `lead:${key}:${nowIso()}`),
+      source: input.source || "Slack",
+      eventType: "lead_upserted",
+      entityKey: key,
+      status: "processed",
+      summary: `${result.created ? "Created" : "Updated"} lead ${row.Company || key}`,
+      rawPayload: input
+    });
+    return result;
+  }
+
+  async createDeal(input) {
+    const company = input.company || input.Company;
+    const hasSpecificIdentity = input.email || input.Email || input.companyDomain || input["Company Domain"];
+    const existingByCompany = company && !hasSpecificIdentity ? await this.repository.findDealByCompany(company) : null;
+    const base = existingByCompany || {};
+    const key = base["Entity Key"] || entityKey(input);
+    if (!key || key === "|") {
+      throw new Error("A deal needs at least a company, company domain, or contact email.");
+    }
+    const owner = await this.canonicalOwner(input.owner || input.Owner);
+    const row = {
+      "Entity Key": key,
+      Company: input.company || input.Company || base.Company,
+      "Company Domain": input.companyDomain || input["Company Domain"] || base["Company Domain"] || "",
+      "First Name": input.firstName || input["First Name"] || base["First Name"] || "",
+      "Last Name": input.lastName || input["Last Name"] || base["Last Name"] || "",
+      Email: input.email || input.Email || base.Email || "",
+      Source: input.source || input.Source || base.Source || "Slack",
+      Campaign: input.campaign || input.Campaign || base.Campaign || "",
+      "Deal Stage": input.stage || input.dealStage || input["Deal Stage"] || base["Deal Stage"] || "Call Booked",
+      Owner: owner || base.Owner || "",
+      "Call Date": input.callDate || input["Call Date"] || base["Call Date"] || "",
+      "Call Status": input.callStatus || base["Call Status"] || "",
+      "Fathom URL": input.fathomUrl || input["Fathom URL"] || base["Fathom URL"] || "",
+      "Fathom Recording ID": input.fathomRecordingId || input["Fathom Recording ID"] || base["Fathom Recording ID"] || "",
+      Pricing: input.pricing || input.Pricing || base.Pricing || "",
+      "Hours/Week": input.hoursPerWeek || input["Hours/Week"] || base["Hours/Week"] || "",
+      "Engineer Type": input.engineerType || input["Engineer Type"] || base["Engineer Type"] || "",
+      "Skills Needed": input.skillsNeeded || input["Skills Needed"] || base["Skills Needed"] || "",
+      "Project Scope": input.projectScope || input["Project Scope"] || base["Project Scope"] || "",
+      "Start Date": input.startDate || input["Start Date"] || base["Start Date"] || "",
+      "Close Date": input.closeDate || input["Close Date"] || base["Close Date"] || "",
+      "If Lost Reason": input.ifLostReason || input["If Lost Reason"] || base["If Lost Reason"] || "",
+      "Next Steps": input.nextSteps || input["Next Steps"] || base["Next Steps"] || "",
+      Notes: input.notes || input.Notes || base.Notes || "",
+      "Slack Thread": input.slackThread || input["Slack Thread"] || base["Slack Thread"] || "",
+      "Handoff Status": input.handoffStatus || base["Handoff Status"] || "",
+      "Source Event ID": input.sourceEventId || input["Source Event ID"] || base["Source Event ID"] || ""
+    };
+
+    const result = await this.repository.upsert(SHEETS.deals, "Entity Key", key, row, "Deal ID", "deal");
+    await this.addLead({
+      ...row,
+      company: row.Company,
+      companyDomain: row["Company Domain"],
+      firstName: row["First Name"],
+      lastName: row["Last Name"],
+      email: row.Email,
+      campaign: row.Campaign,
+      owner: row.Owner,
+      source: row.Source,
+      stage: "Call Booked",
+      sourceEventId: input.sourceEventId ? `${input.sourceEventId}:lead` : ""
+    });
+    await this.repository.addEvent({
+      eventId: input.sourceEventId || stableId("event", `deal:${key}:${nowIso()}`),
+      source: input.source || "Slack",
+      eventType: "deal_upserted",
+      entityKey: key,
+      status: "processed",
+      summary: `${result.created ? "Created" : "Updated"} deal ${row.Company || key}`,
+      rawPayload: input
+    });
+    return result;
+  }
+
+  async assignOwner(input) {
+    const deal = await this.resolveDeal(input);
+    if (!deal) throw new Error(`Could not find deal for ${input.company || input.email || "that company"}`);
+    return this.createDeal({ ...deal, owner: input.owner, source: "Slack", sourceEventId: input.sourceEventId || "" });
+  }
+
+  async setDealStage(input) {
+    const deal = await this.resolveDeal(input);
+    if (!deal) throw new Error(`Could not find deal for ${input.company || input.email || "that company"}`);
+    const result = await this.createDeal({ ...deal, stage: input.stage, source: input.source || "Slack", sourceEventId: input.sourceEventId || "" });
+    if (["Input Call", "Contract Signed"].includes(input.stage)) {
+      await this.moveToHandoff({ ...deal, "Deal Stage": input.stage });
+    }
+    return result;
+  }
+
+  async updateDealFromCall(input) {
+    const transcriptText = cleanText(input.transcriptText || "");
+    if (!transcriptText && !input.fathomUrl) {
+      throw new Error("I need transcript text or a Fathom URL to update the deal.");
+    }
+
+    const extracted = await extractCallFields(this.config, transcriptText || input.fathomUrl);
+    const deal = await this.resolveDeal(input);
+    if (!deal) {
+      throw new Error(`Could not match this call to a deal. Include the company name or contact email.`);
+    }
+
+    const updated = await this.createDeal({
+      ...deal,
+      company: deal.Company,
+      email: deal.Email,
+      source: "Fathom",
+      stage: firstNonEmpty(extracted.deal_stage, deal["Deal Stage"]),
+      fathomUrl: input.fathomUrl || deal["Fathom URL"],
+      pricing: firstNonEmpty(extracted.pricing, deal.Pricing),
+      hoursPerWeek: firstNonEmpty(extracted.hours_per_week, deal["Hours/Week"]),
+      engineerType: firstNonEmpty(extracted.engineer_type, deal["Engineer Type"]),
+      skillsNeeded: firstNonEmpty(extracted.skills_needed, deal["Skills Needed"]),
+      projectScope: firstNonEmpty(extracted.project_scope, deal["Project Scope"]),
+      startDate: firstNonEmpty(extracted.start_date, deal["Start Date"]),
+      ifLostReason: firstNonEmpty(extracted.if_lost_reason, deal["If Lost Reason"]),
+      nextSteps: firstNonEmpty(extracted.next_steps, deal["Next Steps"]),
+      notes: firstNonEmpty(extracted.notes, deal.Notes),
+      sourceEventId: input.sourceEventId || ""
+    });
+
+    if (["Input Call", "Contract Signed"].includes(updated.row["Deal Stage"])) {
+      await this.moveToHandoff(updated.row);
+    }
+    return updated;
+  }
+
+  async moveToHandoff(input) {
+    const deal = input["Deal ID"] ? input : await this.resolveDeal(input);
+    if (!deal) throw new Error(`Could not find deal for ${input.company || input.email || "that company"}`);
+    const key = deal["Entity Key"] || entityKey(deal);
+    const handoffId = stableId("handoff", key);
+    const handoffRow = {
+      "Handoff ID": handoffId,
+      "Deal ID": deal["Deal ID"],
+      "Entity Key": key,
+      Company: deal.Company,
+      "Client/Contact": [deal["First Name"], deal["Last Name"]].map(cleanText).filter(Boolean).join(" "),
+      Email: deal.Email,
+      Owner: deal.Owner,
+      "Handoff Stage": "Ready",
+      "Trigger Stage": deal["Deal Stage"] || "Input Call",
+      "Engineer Type": deal["Engineer Type"],
+      "Skills Needed": deal["Skills Needed"],
+      "Hours/Week": deal["Hours/Week"],
+      "Start Date": deal["Start Date"],
+      Pricing: deal.Pricing,
+      "Project Description": deal["Project Scope"],
+      "Candidate/Profile Requirements": "",
+      "Call Notes": deal.Notes,
+      "Next Steps": deal["Next Steps"],
+      "Slack Handoff Link": deal["Slack Thread"]
+    };
+
+    const result = await this.repository.upsert(SHEETS.handoff, "Handoff ID", handoffId, handoffRow, "Handoff ID", "handoff");
+    const message = generateHandoffMessage(deal);
+    let slackLink = result.row["Slack Handoff Link"] || "";
+    if (!slackLink && this.slackClient && this.config.slack.handoffChannelId) {
+      const posted = await this.slackClient.chat.postMessage({
+        channel: this.config.slack.handoffChannelId,
+        text: message
+      });
+      slackLink = posted.ts ? `slack://${this.config.slack.handoffChannelId}/${posted.ts}` : "";
+      if (slackLink) {
+        await this.repository.upsert(SHEETS.handoff, "Handoff ID", handoffId, { ...handoffRow, "Slack Handoff Link": slackLink }, "Handoff ID", "handoff");
+      }
+    }
+
+    await this.createDeal({ ...deal, company: deal.Company, email: deal.Email, handoffStatus: "Posted", source: "Slack" });
+    return { ...result, message, slackLink };
+  }
+
+  async resolveDeal(input) {
+    if (input["Deal ID"]) return input;
+    if (input.email || input.Email || input.companyDomain || input.company) {
+      const byKey = await this.repository.findDealByKey(input);
+      if (byKey) return byKey;
+    }
+    if (input.company || input.Company) {
+      return this.repository.findDealByCompany(input.company || input.Company);
+    }
+    return null;
+  }
+}
+
+module.exports = { OpsService };
