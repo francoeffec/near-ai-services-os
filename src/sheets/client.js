@@ -20,6 +20,99 @@ function parseServiceAccount(json) {
   }
 }
 
+function tableFromValues(values) {
+  const headers = (values[0] || []).map((header) => String(header || "").trim());
+  const rows = values.slice(1).map((valuesRow, index) => {
+    const row = { _rowNumber: index + 2 };
+    headers.forEach((header, columnIndex) => {
+      if (header) row[header] = valuesRow[columnIndex] === undefined ? "" : valuesRow[columnIndex];
+    });
+    return row;
+  });
+  return { headers, rows };
+}
+
+class ScriptSheetsClient {
+  constructor({ spreadsheetId, scriptWebAppUrl, scriptSharedSecret }) {
+    this.spreadsheetId = spreadsheetId;
+    this.scriptWebAppUrl = scriptWebAppUrl;
+    this.scriptSharedSecret = scriptSharedSecret;
+  }
+
+  async request(action, payload = {}) {
+    const response = await fetch(this.scriptWebAppUrl, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        action,
+        spreadsheetId: this.spreadsheetId,
+        secret: this.scriptSharedSecret,
+        ...payload
+      })
+    });
+    const text = await response.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (_error) {
+      throw new Error(`Sheets proxy returned non-JSON response: ${text.slice(0, 200)}`);
+    }
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || `Sheets proxy failed for ${action}`);
+    }
+    return data.result;
+  }
+
+  async getMetadata() {
+    return this.request("getMetadata");
+  }
+
+  async ensureSheets(sheetNames) {
+    return this.request("ensureSheets", { sheetNames });
+  }
+
+  async batchUpdate(requests) {
+    if (!requests.length) return null;
+    return this.request("batchUpdate", { requests });
+  }
+
+  async getValues(sheetName, range = "A:ZZ") {
+    return this.request("getValues", { sheetName, range });
+  }
+
+  async updateValues(sheetName, startCell, values) {
+    return this.request("updateValues", { sheetName, startCell, values });
+  }
+
+  async appendValues(sheetName, values) {
+    return this.request("appendValues", { sheetName, values });
+  }
+
+  async readTable(sheetName) {
+    return tableFromValues(await this.getValues(sheetName));
+  }
+
+  async writeHeader(sheetName, headers) {
+    return this.updateValues(sheetName, "A1", [headers]);
+  }
+
+  async writeRows(sheetName, headers, rows) {
+    const values = rows.map((row) => headers.map((header) => row[header] || ""));
+    if (values.length === 0) return null;
+    const endColumn = columnLetter(headers.length - 1);
+    return this.updateValues(sheetName, `A2:${endColumn}${rows.length + 1}`, values);
+  }
+
+  async appendRow(sheetName, headers, row) {
+    return this.appendValues(sheetName, [headers.map((header) => row[header] || "")]);
+  }
+
+  async updateRow(sheetName, headers, rowNumber, row) {
+    const endColumn = columnLetter(headers.length - 1);
+    return this.updateValues(sheetName, `A${rowNumber}:${endColumn}${rowNumber}`, [headers.map((header) => row[header] || "")]);
+  }
+}
+
 class SheetsClient {
   constructor({ spreadsheetId, serviceAccountJson, sheetsApi }) {
     this.spreadsheetId = spreadsheetId;
@@ -29,6 +122,7 @@ class SheetsClient {
 
   static async create(config) {
     if (config.sheetsApi) return new SheetsClient(config);
+    if (config.scriptWebAppUrl) return new ScriptSheetsClient(config);
 
     const credentials = parseServiceAccount(config.serviceAccountJson);
     const auth = new google.auth.GoogleAuth({
@@ -101,15 +195,7 @@ class SheetsClient {
 
   async readTable(sheetName) {
     const values = await this.getValues(sheetName);
-    const headers = (values[0] || []).map((header) => String(header || "").trim());
-    const rows = values.slice(1).map((valuesRow, index) => {
-      const row = { _rowNumber: index + 2 };
-      headers.forEach((header, columnIndex) => {
-        if (header) row[header] = valuesRow[columnIndex] === undefined ? "" : valuesRow[columnIndex];
-      });
-      return row;
-    });
-    return { headers, rows };
+    return tableFromValues(values);
   }
 
   async writeHeader(sheetName, headers) {
