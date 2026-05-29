@@ -28,7 +28,9 @@ function loadConfig({ strict = true } = {}) {
     baseUrl: process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`,
     google: {
       spreadsheetId: get("GOOGLE_SPREADSHEET_ID", "1SzVtD8Ql94nGo6hw-FMwnTH_Ur3kIr2zW-d7AqFOrks"),
-      serviceAccountJson: serviceAccountJsonFromEnv()
+      serviceAccountJson: serviceAccountJsonFromEnv(),
+      scriptWebAppUrl: process.env.GOOGLE_SCRIPT_WEB_APP_URL || "",
+      scriptSharedSecret: process.env.GOOGLE_SCRIPT_SHARED_SECRET || ""
     },
     slack: {
       botToken: get("SLACK_BOT_TOKEN", ""),
@@ -70,9 +72,14 @@ function loadConfig({ strict = true } = {}) {
 
 function validateConfig(config, { requireIntegrations = false } = {}) {
   const missing = [];
+  const googleAuthOk = Boolean(
+    config.google.serviceAccountJson ||
+    (config.google.scriptWebAppUrl && config.google.scriptSharedSecret)
+  );
+
   const required = [
     ["GOOGLE_SPREADSHEET_ID", config.google.spreadsheetId],
-    ["GOOGLE_SERVICE_ACCOUNT_JSON", config.google.serviceAccountJson],
+    ["GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_SCRIPT_WEB_APP_URL+GOOGLE_SCRIPT_SHARED_SECRET", googleAuthOk],
     ["SLACK_BOT_TOKEN", config.slack.botToken],
     ["SLACK_SIGNING_SECRET", config.slack.signingSecret],
     ["SLACK_AI_LEADS_CHANNEL_ID", config.slack.aiLeadsChannelId],
