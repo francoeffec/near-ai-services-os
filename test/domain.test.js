@@ -343,13 +343,32 @@ test("environment validator reports missing production secrets", () => {
   assert.equal(result.ok, false);
   assert.deepEqual(result.missing.sort(), [
     "ADMIN_TOKEN",
-    "GOOGLE_SERVICE_ACCOUNT_JSON",
+    "GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_SCRIPT_WEB_APP_URL+GOOGLE_SCRIPT_SHARED_SECRET",
     "OPENAI_API_KEY",
     "SLACK_BOT_TOKEN",
     "SLACK_SIGNING_SECRET",
     "SMARTLEAD_API_KEY",
     "WEBHOOK_SHARED_SECRET"
   ].sort());
+});
+
+test("environment validator accepts Apps Script sheet proxy", () => {
+  const config = loadConfig({ strict: false });
+  const result = validateConfig({
+    ...config,
+    google: {
+      spreadsheetId: "sheet",
+      serviceAccountJson: "",
+      scriptWebAppUrl: "https://script.google.com/macros/s/example/exec",
+      scriptSharedSecret: "secret"
+    },
+    slack: { ...config.slack, botToken: "xoxb-token", signingSecret: "signing", aiLeadsChannelId: "C1" },
+    ai: { ...config.ai, apiKey: "openai" },
+    webhookSharedSecret: "webhook",
+    adminToken: "admin",
+    smartlead: { ...config.smartlead, apiKey: "smartlead" }
+  }, { requireIntegrations: true });
+  assert.equal(result.ok, true);
 });
 
 test("scheduler runs weekly metrics once on configured Monday window", () => {
