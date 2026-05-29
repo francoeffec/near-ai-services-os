@@ -1,0 +1,25 @@
+{
+  "name": "near-ai-services-operating-system",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Slack-first operating system for Near AI Services with Google Sheets as the source of truth.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "NODE_ENV=development node src/index.js",
+    "test": "node --test test/*.test.js",
+    "verify": "node scripts/verify-local.js",
+    "validate:env": "node scripts/validate-env.js",
+    "bootstrap:sheet": "node scripts/bootstrap-sheet.js",
+    "sync:metrics": "node scripts/sync-weekly-metrics.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@slack/bolt": "^4.0.0",
+    "express": "^4.18.3",
+    "googleapis": "^150.0.0"
+  },
+  "devDependencies": {}
+}
