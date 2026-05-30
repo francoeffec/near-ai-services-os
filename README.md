@@ -1,6 +1,6 @@
-# Near AI Services Operating System
+# NearAI Services
 
-This repository contains the cloud service for Near's AI Services operating system.
+This repository contains the cloud service for NearAI Services.
 
 The product model is simple:
 
