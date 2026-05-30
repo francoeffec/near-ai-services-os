@@ -28,7 +28,7 @@ function attachRoutes({ receiver, config, opsService, repository, sheetsClient }
   app.use(express.json({ limit: "5mb" }));
 
   app.get("/healthz", (_req, res) => {
-    res.json({ ok: true, service: "near-ai-services-os" });
+    res.json({ ok: true, service: "nearai-services" });
   });
 
   app.get("/readyz", async (_req, res) => {
