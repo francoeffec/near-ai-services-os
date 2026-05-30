@@ -257,12 +257,16 @@ class OpsService {
       "Candidate/Profile Requirements": "",
       "Call Notes": deal.Notes,
       "Next Steps": deal["Next Steps"],
-      "Slack Handoff Link": deal["Slack Thread"]
+      "Slack Handoff Link": input["Slack Handoff Link"] || ""
     };
 
     const result = await this.repository.upsert(SHEETS.handoff, "Handoff ID", handoffId, handoffRow, "Handoff ID", "handoff");
     const message = generateHandoffMessage(deal);
-    let slackLink = result.row["Slack Handoff Link"] || "";
+    const sourceThreadLink = cleanText(deal["Slack Thread"]);
+    let slackLink = cleanText(result.row["Slack Handoff Link"]);
+    const handoffLinkWasSourceThread = slackLink && sourceThreadLink && slackLink === sourceThreadLink;
+    if (handoffLinkWasSourceThread) slackLink = "";
+
     if (!slackLink && this.slackClient && this.config.slack.handoffChannelId) {
       const posted = await this.slackClient.chat.postMessage({
         channel: this.config.slack.handoffChannelId,
@@ -272,9 +276,11 @@ class OpsService {
       if (slackLink) {
         await this.repository.upsert(SHEETS.handoff, "Handoff ID", handoffId, { ...handoffRow, "Slack Handoff Link": slackLink }, "Handoff ID", "handoff");
       }
+    } else if (handoffLinkWasSourceThread) {
+      await this.repository.upsert(SHEETS.handoff, "Handoff ID", handoffId, { ...handoffRow, __clear: ["Slack Handoff Link"] }, "Handoff ID", "handoff");
     }
 
-    await this.createDeal({ ...deal, company: deal.Company, email: deal.Email, handoffStatus: "Posted", source: "Slack" });
+    await this.createDeal({ ...deal, company: deal.Company, email: deal.Email, handoffStatus: slackLink ? "Posted" : "Ready", source: "Slack" });
     return { ...result, message, slackLink };
   }
 
