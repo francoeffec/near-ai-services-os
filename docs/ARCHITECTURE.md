@@ -8,7 +8,7 @@ Google Sheets remains the database. Slack remains the UI. External systems call 
 
 ## Why
 
-The operating system needs to accept Slack events, Smartlead events, booking events, Fathom transcript events, and scheduled metrics. A service is more reliable than spreadsheet scripts for:
+NearAI Services needs to accept Slack events, Smartlead events, booking events, Fathom transcript events, and scheduled metrics. A service is more reliable than spreadsheet scripts for:
 
 - Slack request signing and event retries.
 - Webhook authentication.
@@ -41,7 +41,7 @@ This avoids silent duplicate rows and lets the team keep editing the spreadsheet
 
 ```mermaid
 flowchart LR
-  Slack["Slack team messages"] --> Service["Near AI OS service"]
+  Slack["Slack team messages"] --> Service["NearAI Services"]
   Smartlead["Smartlead positive replies"] --> Service
   Chili["Chili Piper / booking webhook"] --> Service
   Fathom["Fathom transcripts"] --> Service
