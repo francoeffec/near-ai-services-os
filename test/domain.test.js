@@ -334,6 +334,60 @@ test("moveToHandoff does not repost when handoff already has Slack link", async 
   assert.equal(result.slackLink, "slack://existing");
 });
 
+test("moveToHandoff posts when existing handoff link is only the source thread", async () => {
+  let posts = 0;
+  const handoffRows = [];
+  const repository = {
+    async read(sheetName) {
+      if (sheetName === "Config") return { headers: [], rows: [] };
+      return { headers: [], rows: [] };
+    },
+    async findDealByCompany() {
+      return null;
+    },
+    async findDealByKey() {
+      return null;
+    },
+    async upsert(sheetName, _keyHeader, _keyValue, row) {
+      if (sheetName === "Handoff") {
+        handoffRows.push(row);
+        if (handoffRows.length === 1) {
+          return { row: { ...row, "Slack Handoff Link": "slack://C1/source" }, created: false };
+        }
+      }
+      return { row, created: false };
+    },
+    async addEvent() {}
+  };
+  const slackClient = {
+    chat: {
+      async postMessage({ text }) {
+        posts += 1;
+        assert.match(text, /AI Services handoff: CP Brands/);
+        return { ts: "999.000" };
+      }
+    }
+  };
+  const service = new OpsService({
+    repository,
+    slackClient,
+    config: { slack: { handoffChannelId: "C1" } }
+  });
+
+  const result = await service.moveToHandoff({
+    "Deal ID": "deal_1",
+    "Entity Key": "cpbrandsgroup.com|dionelisp@cpbrandsgroup.com",
+    Company: "CP Brands",
+    Email: "dionelisp@cpbrandsgroup.com",
+    "Deal Stage": "Input Call",
+    "Slack Thread": "slack://C1/source"
+  });
+  assert.equal(posts, 1);
+  assert.equal(result.slackLink, "slack://C1/999.000");
+  assert.equal(handoffRows[0]["Slack Handoff Link"], "");
+  assert.equal(handoffRows[1]["Slack Handoff Link"], "slack://C1/999.000");
+});
+
 test("Smartlead positive reply payload normalizes into lead fields", () => {
   const payload = {
     event_id: "reply_1",
