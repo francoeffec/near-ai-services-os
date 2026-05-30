@@ -1,8 +1,8 @@
 {
-  "name": "near-ai-services-operating-system",
+  "name": "nearai-services",
   "version": "0.1.0",
   "private": true,
-  "description": "Slack-first operating system for Near AI Services with Google Sheets as the source of truth.",
+  "description": "Slack-first automation service for NearAI Services with Google Sheets as the source of truth.",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
