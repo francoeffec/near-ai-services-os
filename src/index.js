@@ -22,7 +22,7 @@ async function main() {
   attachRoutes({ receiver: slack.receiver, config, opsService, repository, sheetsClient });
   startScheduler({ config, repository });
   await slack.app.start(config.port);
-  console.log(`Near AI Services OS running on port ${config.port}`);
+  console.log(`NearAI Services running on port ${config.port}`);
 }
 
 main().catch((error) => {
