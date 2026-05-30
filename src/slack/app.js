@@ -90,7 +90,10 @@ async function handleIntent({ intent, opsService }) {
     case "move_to_handoff": {
       if (!intent.company) throw new Error("Please include the company name.");
       const result = await opsService.moveToHandoff(intent);
-      return `Moved ${result.row.Company} to handoff and generated the handoff summary.`;
+      if (result.slackLink) {
+        return `Moved ${result.row.Company} to handoff and posted the handoff summary.`;
+      }
+      return `Moved ${result.row.Company} to handoff and created the Handoff row, but I could not post a Slack summary.`;
     }
     case "update_deal_from_call": {
       const result = await opsService.updateDealFromCall(intent);
