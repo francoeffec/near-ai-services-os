@@ -1,4 +1,4 @@
-# Deployment Checklist
+# NearAI Services Deployment Checklist
 
 This is the minimum handoff needed to finish production deployment.
 
@@ -8,7 +8,7 @@ Recommended: Render using `render.yaml`.
 
 Needed:
 
-- Permission to create or update the `near-ai-services-os` web service.
+- Permission to create or update the NearAI Services web service.
 - A connected Git repo or a manual deploy path from this repository.
 - Public HTTPS URL after deploy.
 
