@@ -53,6 +53,6 @@ flowchart LR
 ## Critical Risks
 
 - Smartlead and Chili Piper payload shapes vary by setup. The adapters are tolerant, but production verification needs real payload samples.
-- Fathom transcript access may require explicit API/webhook configuration. If Fathom only sends links, the service will ask for pasted transcript text unless API credentials are present.
+- Public Fathom share links are parsed directly for call metadata and transcript-copy output. Private or locked-down links may still require `FATHOM_API_KEY` or pasted transcript text.
 - Owner ambiguity exists between Kevin and Kelvin. The `Config` tab maps aliases to canonical owners and Slack IDs.
 - Google Sheets is not a transactional database. The service minimizes risk with idempotent event IDs, row-level upserts, and one writer process. If usage grows materially, the next step is a small queue, not a CRM.

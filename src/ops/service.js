@@ -1,7 +1,23 @@
 const { SHEETS } = require("../schema");
 const { extractCallFields } = require("../ai/extract");
 const { generateHandoffMessage } = require("../domain/handoff");
-const { cleanText, entityKey, firstNonEmpty, nowIso, stableId } = require("../domain/normalize");
+const { fetchFathomRecording } = require("../integrations/fathom");
+const { cleanText, entityKey, firstNonEmpty, nowIso, splitName, stableId } = require("../domain/normalize");
+
+function isLikelyTranscript(text) {
+  const value = String(text || "");
+  return value.length > 500 || /\bAttached transcript:\b/i.test(value) || /(^|\n)\s*(?:\d{1,2}:)?\d{1,2}:\d{2}\s+-\s+/m.test(value);
+}
+
+function callExtractionText({ recording = {}, transcriptText = "", fallbackText = "" }) {
+  const metadata = [
+    recording.title ? `Call title: ${recording.title}` : "",
+    recording.company ? `Company: ${recording.company}` : "",
+    recording.companyDomain ? `Company domain: ${recording.companyDomain}` : "",
+    recording.callDate ? `Call date: ${recording.callDate}` : ""
+  ].filter(Boolean).join("\n");
+  return [metadata, transcriptText || fallbackText].filter(Boolean).join("\n\nTranscript:\n");
+}
 
 class OpsService {
   constructor({ repository, slackClient, config }) {
@@ -72,7 +88,7 @@ class OpsService {
     const hasSpecificIdentity = input.email || input.Email || input.companyDomain || input["Company Domain"];
     const existingByCompany = company && !hasSpecificIdentity ? await this.repository.findDealByCompany(company) : null;
     const base = existingByCompany || {};
-    const key = base["Entity Key"] || entityKey(input);
+    const key = base["Entity Key"] || input["Entity Key"] || entityKey(input);
     if (!key || key === "|") {
       throw new Error("A deal needs at least a company, company domain, or contact email.");
     }
@@ -150,34 +166,65 @@ class OpsService {
   }
 
   async updateDealFromCall(input) {
-    const transcriptText = cleanText(input.transcriptText || "");
-    if (!transcriptText && !input.fathomUrl) {
+    const suppliedTranscript = input.transcriptText || "";
+    if (!cleanText(suppliedTranscript) && !input.fathomUrl) {
       throw new Error("I need transcript text or a Fathom URL to update the deal.");
     }
 
-    const extracted = await extractCallFields(this.config, transcriptText || input.fathomUrl);
-    const deal = await this.resolveDeal(input);
-    if (!deal) {
-      throw new Error(`Could not match this call to a deal. Include the company name or contact email.`);
+    let recording = {};
+    if (input.fathomUrl && !isLikelyTranscript(suppliedTranscript)) {
+      recording = await fetchFathomRecording(this.config, input.fathomUrl);
     }
 
+    const transcriptText = cleanText(recording.transcriptText) ? recording.transcriptText : suppliedTranscript;
+    if (input.fathomUrl && !cleanText(transcriptText)) {
+      throw new Error("I found the Fathom URL, but could not read the transcript from it. Make sure the share link allows transcript copying.");
+    }
+
+    const extracted = await extractCallFields(this.config, callExtractionText({
+      recording,
+      transcriptText,
+      fallbackText: input.rawText || input.fathomUrl
+    }));
+    const identity = {
+      company: firstNonEmpty(input.company, extracted.company, recording.company),
+      companyDomain: firstNonEmpty(input.companyDomain, input["Company Domain"], extracted.company_domain, recording.companyDomain),
+      email: firstNonEmpty(input.email, input.Email, extracted.contact_email, recording.email)
+    };
+    const contact = splitName(firstNonEmpty(input.contactName, extracted.contact_name));
+    const deal = await this.resolveDeal({ ...input, ...identity });
+    if (!deal && !input.autoCreateDeal) {
+      throw new Error(`Could not match this call to a deal. Include the company name or contact email.`);
+    }
+    if (!deal && !identity.company && !identity.companyDomain && !identity.email) {
+      throw new Error("I read the call, but could not identify the company or contact. Add the company name with the Fathom URL once and I can create the deal.");
+    }
+
+    const base = deal || {};
+
     const updated = await this.createDeal({
-      ...deal,
-      company: deal.Company,
-      email: deal.Email,
+      ...base,
+      company: firstNonEmpty(identity.company, base.Company),
+      companyDomain: firstNonEmpty(identity.companyDomain, base["Company Domain"]),
+      firstName: firstNonEmpty(input.firstName, base["First Name"], contact.firstName),
+      lastName: firstNonEmpty(input.lastName, base["Last Name"], contact.lastName),
+      email: firstNonEmpty(identity.email, base.Email),
       source: "Fathom",
-      stage: firstNonEmpty(extracted.deal_stage, deal["Deal Stage"]),
-      fathomUrl: input.fathomUrl || deal["Fathom URL"],
-      pricing: firstNonEmpty(extracted.pricing, deal.Pricing),
-      hoursPerWeek: firstNonEmpty(extracted.hours_per_week, deal["Hours/Week"]),
-      engineerType: firstNonEmpty(extracted.engineer_type, deal["Engineer Type"]),
-      skillsNeeded: firstNonEmpty(extracted.skills_needed, deal["Skills Needed"]),
-      projectScope: firstNonEmpty(extracted.project_scope, deal["Project Scope"]),
-      startDate: firstNonEmpty(extracted.start_date, deal["Start Date"]),
-      ifLostReason: firstNonEmpty(extracted.if_lost_reason, deal["If Lost Reason"]),
-      nextSteps: firstNonEmpty(extracted.next_steps, deal["Next Steps"]),
-      notes: firstNonEmpty(extracted.notes, deal.Notes),
-      sourceEventId: input.sourceEventId || ""
+      stage: firstNonEmpty(extracted.deal_stage, input.stage, base["Deal Stage"], "Call Booked"),
+      callDate: firstNonEmpty(input.callDate, recording.callDate, base["Call Date"]),
+      fathomUrl: firstNonEmpty(input.fathomUrl, recording.url, base["Fathom URL"]),
+      fathomRecordingId: firstNonEmpty(input.fathomRecordingId, recording.recordingId, base["Fathom Recording ID"]),
+      pricing: firstNonEmpty(extracted.pricing, base.Pricing),
+      hoursPerWeek: firstNonEmpty(extracted.hours_per_week, base["Hours/Week"]),
+      engineerType: firstNonEmpty(extracted.engineer_type, base["Engineer Type"]),
+      skillsNeeded: firstNonEmpty(extracted.skills_needed, base["Skills Needed"]),
+      projectScope: firstNonEmpty(extracted.project_scope, base["Project Scope"]),
+      startDate: firstNonEmpty(extracted.start_date, base["Start Date"]),
+      ifLostReason: firstNonEmpty(extracted.if_lost_reason, base["If Lost Reason"]),
+      nextSteps: firstNonEmpty(extracted.next_steps, base["Next Steps"]),
+      notes: firstNonEmpty(extracted.notes, base.Notes),
+      slackThread: firstNonEmpty(input.slackThread, base["Slack Thread"]),
+      sourceEventId: firstNonEmpty(input.sourceEventId, recording.sourceEventId)
     });
 
     if (["Input Call", "Contract Signed"].includes(updated.row["Deal Stage"])) {

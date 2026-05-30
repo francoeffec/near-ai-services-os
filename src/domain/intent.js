@@ -18,7 +18,7 @@ const STAGE_ALIASES = [
 function extractCompany(text) {
   const patterns = [
     /\bassign\s+.+?\s+to\s+([A-Z][A-Za-z0-9&.\-' ]{1,60})(?:\.|,|$)/i,
-    /\b(?:add|create)\s+([A-Z][A-Za-z0-9&.\-' ]{1,60}?)\s+as\s+a\s+(?:lead|deal)\b/i,
+    /\b(?:add|create)\s+([A-Z][A-Za-z0-9&.\-' ]{1,60}?)\s+as\s+(?:a\s+)?(?:lead|deal)\b/i,
     /\b(?:lead|deal|company)\s+for\s+([A-Z][A-Za-z0-9&.\-' ]{1,60})(?:\.|,|$)/i,
     /\b(?:move|update)\s+([A-Z][A-Za-z0-9&.\-' ]{1,60}?)(?:\s+(?:to|using|with|for)\b|\.|,|$)/i,
     /\b(?:add|create)\s+([A-Z][A-Za-z0-9&.\-' ]{1,60})(?:\.|,|$)/i
@@ -28,6 +28,7 @@ function extractCompany(text) {
     const match = text.match(pattern);
     if (match && match[1]) {
       return cleanText(match[1])
+        .replace(/\s+as\s+(?:a\s+)?(?:lead|deal)$/i, "")
         .replace(/\b(as|to|using|with|for|a|the)$/i, "")
         .replace(/[.,;:]+$/g, "")
         .trim();
@@ -56,8 +57,9 @@ function extractStage(text) {
 }
 
 function extractFathomUrl(text) {
-  const urls = text.match(/https?:\/\/\S+/gi) || [];
-  return urls.find((url) => /fathom|fathom\.video/i.test(url)) || "";
+  const urls = text.match(/https?:\/\/[^\s<>)|]+/gi) || [];
+  const url = urls.find((candidate) => /fathom|fathom\.video/i.test(candidate)) || "";
+  return cleanText(url).replace(/[.,;:!?]+$/g, "");
 }
 
 function extractPerson(text) {
@@ -91,8 +93,16 @@ function parseIntent(text) {
     return { type: "move_to_handoff", company, stage: "Input Call", rawText: body };
   }
 
-  if (/\bupdate\b/i.test(body) && (fathomUrl || /transcript|call notes|fathom/i.test(body))) {
-    return { type: "update_deal_from_call", company, fathomUrl, transcriptText: body, rawText: body };
+  if (fathomUrl || (/\bupdate\b/i.test(body) && /transcript|call notes|fathom/i.test(body))) {
+    return {
+      type: "update_deal_from_call",
+      company,
+      email,
+      fathomUrl,
+      transcriptText: body,
+      autoCreateDeal: Boolean(fathomUrl),
+      rawText: body
+    };
   }
 
   if (/\b(create|add)\b.*\bdeal\b|\bcall booked\b/i.test(body)) {

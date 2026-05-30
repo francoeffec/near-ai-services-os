@@ -50,6 +50,7 @@ function helpText() {
     "Try:",
     "- `Add Apple as a lead. Jane Doe. jane@apple.com. Interested in RevOps automation.`",
     "- `Create a deal for Venveo.`",
+    "- Drop a Fathom share URL in #ai-leads after an AI Services call.",
     "- `Update Mantra Health using this Fathom transcript: ...`",
     "- `Move CP Brands to handoff.`",
     "- `Assign Kelvin to Apple.`"
@@ -93,7 +94,7 @@ async function handleIntent({ intent, opsService }) {
     }
     case "update_deal_from_call": {
       const result = await opsService.updateDealFromCall(intent);
-      return `Updated ${result.row.Company} from the call notes. Please review the row in Deals.`;
+      return `${result.created ? "Created" : "Updated"} ${result.row.Company} from the Fathom call. I also synced the lead row.`;
     }
     case "help":
       return helpText();

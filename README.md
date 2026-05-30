@@ -19,7 +19,7 @@ The tradeoff is that we need a deployed service and secrets, but the payoff is m
 
 - Creates and updates leads from Slack or Smartlead positive replies.
 - Creates deals from Slack, Chili Piper/Zapier booking payloads, or calendar-style booking payloads.
-- Updates deals from Fathom transcript payloads or pasted/attached call notes in Slack.
+- Creates or updates deals and lead rows from Fathom share URLs, transcript payloads, or pasted/attached call notes in Slack.
 - Moves deals to handoff and generates a Slack handoff message.
 - Updates owner/recruiting assignments from natural-language Slack commands.
 - Maintains weekly Smartlead and sheet-derived reporting.
@@ -32,6 +32,7 @@ Supported through app mentions, channel messages in the allowed AI Leads channel
 ```text
 Add Apple as a lead. Jane Doe. jane@apple.com. Interested in RevOps automation.
 Create a deal for Venveo.
+https://fathom.video/share/...
 Update Mantra Health using this Fathom transcript: ...
 Move CP Brands to handoff.
 Assign Kelvin to Apple.

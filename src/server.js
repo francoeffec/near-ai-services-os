@@ -86,10 +86,13 @@ function attachRoutes({ receiver, config, opsService, repository, sheetsClient }
       const transcriptText = payload.transcriptText || await fetchFathomTranscript(config, payload.recordingId || payload.url);
       const result = await opsService.updateDealFromCall({
         company: payload.company,
+        companyDomain: payload.companyDomain,
         email: payload.email,
         fathomUrl: payload.url,
+        fathomRecordingId: payload.recordingId,
         transcriptText,
-        sourceEventId: payload.sourceEventId
+        sourceEventId: payload.sourceEventId,
+        autoCreateDeal: true
       });
       res.json({ ok: true, deal: result.row });
     } catch (error) {

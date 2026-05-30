@@ -131,6 +131,7 @@ Run these in `#ai-leads` after deploy:
 ```text
 /near-ai Add TestCo as a lead. Jane Doe. jane@testco.com. Interested in AI workflow automation.
 /near-ai Create a deal for TestCo.
+https://fathom.video/share/...
 /near-ai Assign Kelvin to TestCo.
 /near-ai Move TestCo to handoff.
 ```
@@ -139,6 +140,7 @@ Expected:
 
 - `Leads` has one TestCo row.
 - `Deals` has one TestCo row, not duplicates.
+- A raw Fathom share URL in `#ai-leads` creates or updates the deal and syncs the lead row.
 - `Handoff` has one TestCo row.
 - `Events` contains the processed Slack events.
 - The bot posts confirmations in Slack.

@@ -1,12 +1,16 @@
 const { cleanText } = require("../domain/normalize");
 
 async function extractCallFieldsWithOpenAI(config, transcriptText) {
-  if (!config.ai.apiKey) return {};
+  if (!config.ai?.apiKey) return {};
 
   const jsonSchema = {
     type: "object",
     additionalProperties: false,
     properties: {
+      company: { type: "string" },
+      company_domain: { type: "string" },
+      contact_name: { type: "string" },
+      contact_email: { type: "string" },
       deal_stage: { type: "string" },
       pricing: { type: "string" },
       hours_per_week: { type: "string" },
@@ -19,6 +23,10 @@ async function extractCallFieldsWithOpenAI(config, transcriptText) {
       if_lost_reason: { type: "string" }
     },
     required: [
+      "company",
+      "company_domain",
+      "contact_name",
+      "contact_email",
       "deal_stage",
       "pricing",
       "hours_per_week",
@@ -39,7 +47,7 @@ async function extractCallFieldsWithOpenAI(config, transcriptText) {
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      model: config.ai.model,
+      model: config.ai.model || "gpt-4.1-mini",
       response_format: {
         type: "json_schema",
         json_schema: {
@@ -51,7 +59,7 @@ async function extractCallFieldsWithOpenAI(config, transcriptText) {
       messages: [
         {
           role: "system",
-          content: "Extract Near AI Services deal fields from a sales call transcript. Use empty strings when the transcript does not support a field. Do not invent facts."
+          content: "Extract Near AI Services deal fields from a sales call transcript. The company and contact should be the external prospect, not Near. Use empty strings when the transcript does not support a field. Do not invent facts."
         },
         {
           role: "user",
@@ -69,8 +77,72 @@ async function extractCallFieldsWithOpenAI(config, transcriptText) {
   return JSON.parse(content);
 }
 
+function firstExternalEmail(body) {
+  const emails = body.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
+  return emails.find((email) => !/@hirewithnear\.com$/i.test(email)) || "";
+}
+
+function extractCompanyName(body) {
+  const direct = body.match(/\bCompany:\s*([^\n]+)/i) || body.match(/\bProspect company:\s*([^\n]+)/i);
+  if (direct) return cleanText(direct[1]).replace(/[.,;:]+$/g, "");
+
+  const title = body.match(/\b(?:Call title|Title):\s*([^\n]+)/i);
+  if (title) {
+    const titleText = cleanText(title[1]);
+    const afterSlash = titleText.includes("//") ? titleText.split("//").pop() : titleText;
+    const candidate = afterSlash
+      .split(/\+| with | - /i)
+      .map(cleanText)
+      .find((part) => part && !/^near$/i.test(part) && !/^ai automation$/i.test(part));
+    if (candidate) return candidate;
+  }
+
+  return "";
+}
+
+function extractCompanyDomain(body) {
+  const direct = body.match(/\bCompany domain:\s*([a-z0-9.-]+\.[a-z]{2,})/i);
+  if (direct) return direct[1].toLowerCase();
+  const email = firstExternalEmail(body);
+  if (email) return email.split("@").pop().toLowerCase();
+  const domains = body.match(/\b[a-z0-9.-]+\.[a-z]{2,}\b/gi) || [];
+  return (domains.find((domain) => !/hirewithnear\.com/i.test(domain) && !/fathom\.video/i.test(domain)) || "").toLowerCase();
+}
+
+function extractContactName(body) {
+  const direct = body.match(/\bContact:\s*([^\n<]+)/i) || body.match(/\bClient\/Contact:\s*([^\n<]+)/i);
+  if (direct) return cleanText(direct[1]).replace(/[.,;:]+$/g, "");
+
+  const speakerLines = body.match(/^\d{1,2}:\d{2}\s*-\s*([^\n]+)$/gim) || [];
+  for (const line of speakerLines) {
+    const name = cleanText(line.replace(/^\d{1,2}:\d{2}\s*-\s*/i, ""));
+    if (name && !/near|franco|camila|iphone|speaker/i.test(name)) return name;
+  }
+  return "";
+}
+
+function collectSkills(body) {
+  const skills = [
+    ["n8n", /\bn8n\b|\b8n\b/i],
+    ["Airtable", /\bairtable\b/i],
+    ["Supabase", /\bsupabase\b/i],
+    ["APIs", /\bapi\b|\bapis\b/i],
+    ["MCP", /\bmcp\b/i],
+    ["Custom GPTs", /\bcustom gpt\b|\bgpts?\b/i],
+    ["Copilot", /\bcopilot\b/i],
+    ["Prompt Engineering", /\bprompt engineering\b/i],
+    ["AI agents", /\bagents?\b/i],
+    ["workflow automation", /\bworkflow\b|\bautomatiz/i]
+  ];
+  return skills
+    .filter(([, pattern]) => pattern.test(body))
+    .map(([label]) => label)
+    .join(", ");
+}
+
 function heuristicCallExtraction(text) {
-  const body = cleanText(text);
+  const raw = String(text || "");
+  const body = cleanText(raw);
   const lower = body.toLowerCase();
   const stage = lower.includes("signed")
     ? "Contract Signed"
@@ -80,16 +152,23 @@ function heuristicCallExtraction(text) {
         ? "Qualified"
         : "";
 
-  const pricing = (body.match(/\$[0-9,]+(?:\s*\/\s*(?:month|mo|hour|hr|week))?/i) || [])[0] || "";
+  const pricing = (body.match(/\$[0-9,]+(?:\s*\/\s*(?:month|mo|hour|hr|week))?/i) || [])[0]
+    || (body.match(/\b(?:usd|us\$)?\s*[0-9]{2,4}\s*(?:d[oó]lares|usd)?\s*(?:la hora|por hora|\/\s*(?:hour|hr)|per hour)\b/i) || [])[0]
+    || "";
   const hours = (body.match(/\b[0-9]{1,3}\s*(?:hours|hrs|h)\/?(?:week|wk)?\b/i) || [])[0] || "";
   const startDate = (body.match(/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}(?:,\s+\d{4})?\b/i) || [])[0] || "";
+  const skills = collectSkills(body);
 
   return {
+    company: extractCompanyName(raw),
+    company_domain: extractCompanyDomain(raw),
+    contact_name: extractContactName(raw),
+    contact_email: firstExternalEmail(raw),
     deal_stage: stage,
     pricing,
     hours_per_week: hours,
-    engineer_type: "",
-    skills_needed: "",
+    engineer_type: skills ? "AI Automation Engineer" : "",
+    skills_needed: skills,
     project_scope: body.slice(0, 1200),
     start_date: startDate,
     next_steps: "",

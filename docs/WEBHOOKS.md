@@ -71,7 +71,7 @@ Endpoint:
 POST /webhooks/fathom
 ```
 
-Best setup: configure Fathom to send transcript text or transcript segments. If only a recording ID is sent, the service can fetch the transcript when `FATHOM_API_KEY` is configured.
+Best setup: configure Fathom to send transcript text or transcript segments. The service can also read public `fathom.video/share/...` URLs by parsing the share page metadata and transcript-copy endpoint. If only a private recording ID is sent, configure `FATHOM_API_KEY`.
 
 Example:
 

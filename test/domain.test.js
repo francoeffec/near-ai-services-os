@@ -5,7 +5,7 @@ const { parseIntent } = require("../src/domain/intent");
 const { generateHandoffMessage } = require("../src/domain/handoff");
 const { diagnose, syncWeeklyMetrics, weekStart } = require("../src/ops/metrics");
 const { OpsService } = require("../src/ops/service");
-const { transcriptToText } = require("../src/integrations/fathom");
+const { htmlTranscriptToText, parseFathomSharePage, transcriptToText } = require("../src/integrations/fathom");
 const { mergePreservingExisting } = require("../src/sheets/repository");
 const { inferCompanyFromThread } = require("../src/slack/app");
 const { isPositiveReply, normalizeSmartleadReply } = require("../src/integrations/smartlead");
@@ -13,6 +13,7 @@ const { normalizeBooking } = require("../src/integrations/booking");
 const { normalizeFathomPayload } = require("../src/integrations/fathom");
 const { loadConfig, validateConfig } = require("../src/config");
 const { shouldRunMetrics } = require("../src/jobs/scheduler");
+const { buildValidationRequests } = require("../src/sheets/bootstrap");
 
 test("entityKey uses domain and normalized email", () => {
   assert.equal(entityKey({ companyDomain: "https://www.Apple.com/path", email: " Jane@Apple.com " }), "apple.com|jane@apple.com");
@@ -27,9 +28,22 @@ test("parseIntent detects lead creation", () => {
   assert.equal(intent.email, "jane@apple.com");
 });
 
+test("parseIntent handles lead creation without an article", () => {
+  const intent = parseIntent("Add Microsoft as lead");
+  assert.equal(intent.type, "add_lead");
+  assert.equal(intent.company, "Microsoft");
+});
+
 test("parseIntent detects assignments and handoff", () => {
   assert.deepEqual(parseIntent("Assign Kelvin to Apple.").type, "assign_owner");
   assert.equal(parseIntent("Move CP Brands to handoff.").type, "move_to_handoff");
+});
+
+test("parseIntent treats raw Fathom links as call updates that can create deals", () => {
+  const intent = parseIntent("<https://fathom.video/share/MnszU5JTucMRvozGWkBUgfD7b3C7jCRm>");
+  assert.equal(intent.type, "update_deal_from_call");
+  assert.equal(intent.fathomUrl, "https://fathom.video/share/MnszU5JTucMRvozGWkBUgfD7b3C7jCRm");
+  assert.equal(intent.autoCreateDeal, true);
 });
 
 test("handoff message includes recruiting fields", () => {
@@ -99,6 +113,29 @@ test("fathom transcript arrays become speaker text", () => {
   );
 });
 
+test("Fathom share pages expose company metadata and transcript text", () => {
+  const dataPage = JSON.stringify({
+    props: {
+      call: {
+        id: 692333461,
+        title: "AI Automation //Pisteyo + Near",
+        started_at: "2026-05-29T17:00:00.000000Z",
+        company: { name: "Pisteyo", domain: "pisteyo.com" }
+      },
+      copyTranscriptUrl: "https://fathom.video/calls/692333461/copy_transcript?token=abc"
+    }
+  }).replace(/"/g, "&quot;");
+  const metadata = parseFathomSharePage(`<div id="app" data-page="${dataPage}"></div>`, "https://fathom.video/share/abc");
+  assert.equal(metadata.recordingId, "692333461");
+  assert.equal(metadata.company, "Pisteyo");
+  assert.equal(metadata.companyDomain, "pisteyo.com");
+  assert.equal(metadata.copyTranscriptUrl, "https://fathom.video/calls/692333461/copy_transcript?token=abc");
+
+  const text = htmlTranscriptToText("<p><a>@0:09</a> - <b>Client</b></p><p>Need n8n and API automation.</p>");
+  assert.match(text, /Client/);
+  assert.match(text, /Need n8n and API automation/);
+});
+
 test("repository merge preserves existing non-empty values on partial updates", () => {
   const merged = mergePreservingExisting(
     { Company: "Venveo", Pricing: "$4,000/mo", Notes: "Keep this" },
@@ -141,6 +178,97 @@ test("createDeal honors existing sheet Deal Stage field", async () => {
   });
   assert.equal(upserts[0].row["Deal Stage"], "Input Call");
   assert.equal(upserts[0].row["Handoff Status"], "Posted");
+});
+
+test("bootstrap validations clear stale text-column dropdowns and reapply by header", () => {
+  const requests = buildValidationRequests({
+    sheets: [
+      { properties: { title: "Leads", sheetId: 1799443453, gridProperties: { rowCount: 1000 } } },
+      { properties: { title: "Deals", sheetId: 639364026, gridProperties: { rowCount: 1000 } } },
+      { properties: { title: "Handoff", sheetId: 746939414, gridProperties: { rowCount: 1000 } } }
+    ]
+  });
+
+  const leadsClear = requests.find((request) => request.setDataValidation?.range.sheetId === 1799443453 && !request.setDataValidation.rule);
+  assert.equal(leadsClear.setDataValidation.range.startColumnIndex, 0);
+  assert.equal(leadsClear.setDataValidation.range.endColumnIndex, 21);
+
+  const leadsSource = requests.find((request) => {
+    const update = request.setDataValidation;
+    return update?.range.sheetId === 1799443453 && update.range.startColumnIndex === 7;
+  });
+  assert.equal(leadsSource.setDataValidation.rule.condition.values[0].userEnteredValue, "=Config!$C$15:$C$18");
+
+  const dealsStage = requests.find((request) => {
+    const update = request.setDataValidation;
+    return update?.range.sheetId === 639364026 && update.range.startColumnIndex === 9;
+  });
+  assert.equal(dealsStage.setDataValidation.rule.condition.values[0].userEnteredValue, "=Config!$C$7:$C$14");
+
+  const badIdentityDropdown = requests.find((request) => {
+    const update = request.setDataValidation;
+    return update?.rule && update.range.sheetId === 639364026 && [4, 5, 6].includes(update.range.startColumnIndex);
+  });
+  assert.equal(badIdentityDropdown, undefined);
+});
+
+test("updateDealFromCall creates a deal and lead when a Fathom call has no existing deal", async () => {
+  const upserts = [];
+  const events = [];
+  const repository = {
+    async read(sheetName) {
+      if (sheetName === "Config") return { headers: [], rows: [] };
+      return { headers: [], rows: [] };
+    },
+    async findDealByCompany() {
+      return null;
+    },
+    async findDealByKey() {
+      return null;
+    },
+    async upsert(sheetName, keyHeader, keyValue, row) {
+      upserts.push({ sheetName, keyHeader, keyValue, row });
+      return { row, created: true };
+    },
+    async addEvent(event) {
+      events.push(event);
+    }
+  };
+  const service = new OpsService({
+    repository,
+    slackClient: null,
+    config: { ai: { apiKey: "" }, fathom: {}, slack: {} }
+  });
+  const transcript = [
+    "Company: Pisteyo",
+    "Company domain: pisteyo.com",
+    "Contact: Eduardo Suarez",
+    "Franco: We can support quick AI automation projects.",
+    "Client: We need n8n, Airtable, Supabase, APIs and MCP support.",
+    "Franco: Those AI automation engineers are around 70 dolares la hora.",
+    "Client: Next step is to send info and schedule a call with my partner.",
+    "Extra transcript context ".repeat(40)
+  ].join("\n");
+
+  const result = await service.updateDealFromCall({
+    fathomUrl: "https://fathom.video/share/abc",
+    transcriptText: transcript,
+    autoCreateDeal: true,
+    sourceEventId: "slack:call-1",
+    slackThread: "slack://C1/123"
+  });
+
+  assert.equal(result.created, true);
+  assert.equal(result.row.Company, "Pisteyo");
+  assert.equal(result.row["Company Domain"], "pisteyo.com");
+  assert.equal(result.row.Source, "Fathom");
+  assert.equal(result.row["Fathom URL"], "https://fathom.video/share/abc");
+  assert.match(result.row["Skills Needed"], /n8n/);
+  assert.match(result.row.Pricing, /70/);
+  assert.equal(upserts[0].sheetName, "Deals");
+  assert.equal(upserts[1].sheetName, "Leads");
+  assert.equal(upserts[1].row["Lead Stage"], "Call Booked");
+  assert.equal(events.at(-1).eventType, "deal_upserted");
 });
 
 test("inferCompanyFromThread finds company in prior Slack context", async () => {

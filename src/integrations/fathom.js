@@ -1,4 +1,4 @@
-const { firstNonEmpty } = require("../domain/normalize");
+const { cleanText, firstNonEmpty } = require("../domain/normalize");
 
 function transcriptToText(value) {
   if (!Array.isArray(value)) return value || "";
@@ -11,6 +11,71 @@ function transcriptToText(value) {
     .join("\n");
 }
 
+function firstRawNonEmpty(...values) {
+  for (const value of values) {
+    if (cleanText(value)) return String(value);
+  }
+  return "";
+}
+
+function decodeHtmlEntities(value) {
+  return cleanText(value)
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#(\d+);/g, (_match, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_match, code) => String.fromCharCode(parseInt(code, 16)));
+}
+
+function htmlTranscriptToText(html) {
+  return decodeHtmlEntities(html || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<\/h[1-6]>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .split("\n")
+    .map((line) => cleanText(line))
+    .filter(Boolean)
+    .join("\n");
+}
+
+function normalizeCompany(value) {
+  if (!value || typeof value !== "object") return cleanText(value);
+  return firstNonEmpty(value.name, value.company, value.domain);
+}
+
+function normalizeCompanyDomain(value) {
+  if (!value || typeof value !== "object") return "";
+  return firstNonEmpty(value.domain, value.company_domain);
+}
+
+function parseFathomSharePage(html, sourceUrl = "") {
+  const match = String(html || "").match(/<div[^>]+id=["']app["'][^>]+data-page="([^"]+)"/i);
+  if (!match) return { url: sourceUrl };
+
+  try {
+    const dataPage = JSON.parse(decodeHtmlEntities(match[1]));
+    const props = dataPage.props || {};
+    const call = props.call || {};
+    const company = call.company || {};
+    return {
+      sourceEventId: call.id ? `fathom:${call.id}` : "",
+      recordingId: cleanText(call.id),
+      url: firstNonEmpty(sourceUrl, dataPage.url),
+      title: firstNonEmpty(call.title, call.topic, props.head?.title),
+      company: normalizeCompany(company),
+      companyDomain: normalizeCompanyDomain(company),
+      callDate: firstNonEmpty(call.started_at, call.recording?.started_at),
+      copyTranscriptUrl: props.copyTranscriptUrl || ""
+    };
+  } catch (_error) {
+    return { url: sourceUrl };
+  }
+}
+
 function normalizeFathomPayload(payload) {
   const recording = payload.recording || payload.call || payload.meeting || payload;
   return {
@@ -18,9 +83,10 @@ function normalizeFathomPayload(payload) {
     recordingId: firstNonEmpty(recording.id, payload.recording_id),
     url: firstNonEmpty(recording.url, recording.share_url, payload.url, payload.fathom_url),
     title: firstNonEmpty(recording.title, payload.title),
-    company: firstNonEmpty(payload.company, recording.company),
+    company: firstNonEmpty(normalizeCompany(payload.company), normalizeCompany(recording.company)),
+    companyDomain: firstNonEmpty(payload.company_domain, payload.companyDomain, normalizeCompanyDomain(payload.company), normalizeCompanyDomain(recording.company)),
     email: firstNonEmpty(payload.email, recording.email),
-    transcriptText: firstNonEmpty(
+    transcriptText: firstRawNonEmpty(
       transcriptToText(payload.transcript),
       payload.transcript_text,
       transcriptToText(recording.transcript),
@@ -30,11 +96,11 @@ function normalizeFathomPayload(payload) {
   };
 }
 
-async function fetchFathomTranscript(config, recordingIdOrUrl) {
-  if (!config.fathom.apiKey) return "";
+async function fetchFathomApiTranscript(config, recordingIdOrUrl) {
+  if (!config.fathom?.apiKey) return "";
   if (!recordingIdOrUrl) return "";
 
-  const base = config.fathom.baseUrl.replace(/\/$/, "");
+  const base = (config.fathom.baseUrl || "https://api.fathom.ai/external/v1").replace(/\/$/, "");
   const recordingId = String(recordingIdOrUrl).split("/").filter(Boolean).pop();
   const candidates = [`${base}/recordings/${encodeURIComponent(recordingId)}/transcript`];
 
@@ -61,4 +127,57 @@ async function fetchFathomTranscript(config, recordingIdOrUrl) {
   return "";
 }
 
-module.exports = { fetchFathomTranscript, normalizeFathomPayload, transcriptToText };
+async function fetchFathomShareRecording(shareUrl) {
+  const pageResponse = await fetch(shareUrl, { headers: { Accept: "text/html" } });
+  if (!pageResponse.ok) {
+    throw new Error(`Fathom share page failed: ${pageResponse.status} ${pageResponse.statusText}`);
+  }
+
+  const html = await pageResponse.text();
+  const metadata = parseFathomSharePage(html, shareUrl);
+  let transcriptText = "";
+
+  if (metadata.copyTranscriptUrl) {
+    const transcriptUrl = new URL(metadata.copyTranscriptUrl, shareUrl).toString();
+    const transcriptResponse = await fetch(transcriptUrl, { headers: { Accept: "application/json" } });
+    if (transcriptResponse.ok) {
+      const data = await transcriptResponse.json();
+      transcriptText = firstRawNonEmpty(
+        data.text,
+        data.transcript_text,
+        transcriptToText(data.transcript),
+        htmlTranscriptToText(data.html)
+      );
+    }
+  }
+
+  return { ...metadata, transcriptText };
+}
+
+async function fetchFathomRecording(config, recordingIdOrUrl) {
+  const source = cleanText(recordingIdOrUrl);
+  if (!source) return {};
+
+  if (/^https?:\/\/(?:www\.)?fathom\.video\/share\//i.test(source)) {
+    return fetchFathomShareRecording(source);
+  }
+
+  return {
+    recordingId: source,
+    transcriptText: await fetchFathomApiTranscript(config, source)
+  };
+}
+
+async function fetchFathomTranscript(config, recordingIdOrUrl) {
+  const recording = await fetchFathomRecording(config, recordingIdOrUrl);
+  return recording.transcriptText || "";
+}
+
+module.exports = {
+  fetchFathomRecording,
+  fetchFathomTranscript,
+  htmlTranscriptToText,
+  normalizeFathomPayload,
+  parseFathomSharePage,
+  transcriptToText
+};

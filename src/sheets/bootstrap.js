@@ -9,6 +9,82 @@ const LEGACY_HEADER_ALIASES = {
   Hours: "Hours/Week"
 };
 
+const BODY_DROPDOWNS = {
+  [SHEETS.leads]: [
+    { header: "Source", range: "=Config!$C$15:$C$18" },
+    { header: "Lead Stage", range: "=Config!$C$2:$C$6" },
+    { header: "Owner", range: "=Config!$C$19:$C$21" }
+  ],
+  [SHEETS.deals]: [
+    { header: "Source", range: "=Config!$C$15:$C$18" },
+    { header: "Deal Stage", range: "=Config!$C$7:$C$14" },
+    { header: "Owner", range: "=Config!$C$19:$C$21" }
+  ],
+  [SHEETS.handoff]: [
+    { header: "Owner", range: "=Config!$C$19:$C$21" },
+    { header: "Trigger Stage", range: "=Config!$C$22:$C$23" }
+  ]
+};
+
+function dropdownRule(range) {
+  return {
+    condition: {
+      type: "ONE_OF_RANGE",
+      values: [{ userEnteredValue: range }]
+    },
+    strict: true,
+    showCustomUi: true
+  };
+}
+
+function buildValidationRequests(metadata) {
+  const sheetByTitle = new Map((metadata.sheets || []).map((sheet) => [sheet.properties.title, sheet]));
+  const requests = [];
+
+  for (const [sheetName, dropdowns] of Object.entries(BODY_DROPDOWNS)) {
+    const sheet = sheetByTitle.get(sheetName);
+    const headers = SCHEMAS[sheetName] || [];
+    if (!sheet || headers.length === 0) continue;
+
+    const sheetId = sheet.properties.sheetId;
+    const rowCount = sheet.properties.gridProperties?.rowCount || 1000;
+    const bodyRange = {
+      sheetId,
+      startRowIndex: 1,
+      endRowIndex: rowCount,
+      startColumnIndex: 0,
+      endColumnIndex: headers.length
+    };
+
+    requests.push({ setDataValidation: { range: bodyRange } });
+
+    for (const dropdown of dropdowns) {
+      const columnIndex = headers.indexOf(dropdown.header);
+      if (columnIndex === -1) continue;
+      requests.push({
+        setDataValidation: {
+          range: {
+            sheetId,
+            startRowIndex: 1,
+            endRowIndex: rowCount,
+            startColumnIndex: columnIndex,
+            endColumnIndex: columnIndex + 1
+          },
+          rule: dropdownRule(dropdown.range)
+        }
+      });
+    }
+  }
+
+  return requests;
+}
+
+async function applySheetValidations(sheetsClient) {
+  const metadata = await sheetsClient.getMetadata();
+  const requests = buildValidationRequests(metadata);
+  if (requests.length > 0) await sheetsClient.batchUpdate(requests);
+}
+
 function migrateRows(sheetName, headers, rows, targetHeaders) {
   const now = nowIso();
   return rows
@@ -73,7 +149,9 @@ async function bootstrapSpreadsheet(sheetsClient) {
     await sheetsClient.appendValues(SHEETS.config, CONFIG_ROWS);
   }
 
+  await applySheetValidations(sheetsClient);
+
   return results;
 }
 
-module.exports = { bootstrapSpreadsheet, migrateRows };
+module.exports = { applySheetValidations, bootstrapSpreadsheet, buildValidationRequests, migrateRows };
