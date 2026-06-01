@@ -3,7 +3,7 @@ const { bootstrapSpreadsheet } = require("./sheets/bootstrap");
 const { normalizeBooking } = require("./integrations/booking");
 const { normalizeFathomPayload, fetchFathomTranscript } = require("./integrations/fathom");
 const { isPositiveReply, normalizeSmartleadReply } = require("./integrations/smartlead");
-const { syncWeeklyMetrics } = require("./ops/metrics");
+const { syncEmailOutreachPerformance, syncWeeklyMetrics } = require("./ops/metrics");
 
 function requireSecret(config, req, res) {
   const supplied = req.query.secret || req.get("x-near-ai-secret");
@@ -113,6 +113,16 @@ function attachRoutes({ receiver, config, opsService, repository, sheetsClient }
     if (!requireAdmin(config, req, res)) return;
     try {
       const result = await syncWeeklyMetrics({ config, repository });
+      res.json({ ok: true, result });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: error.message });
+    }
+  });
+
+  app.post("/jobs/email-outreach-performance", async (req, res) => {
+    if (!requireAdmin(config, req, res)) return;
+    try {
+      const result = await syncEmailOutreachPerformance({ config, repository, sheetsClient });
       res.json({ ok: true, result });
     } catch (error) {
       res.status(500).json({ ok: false, error: error.message });

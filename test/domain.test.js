@@ -3,7 +3,7 @@ const test = require("node:test");
 const { entityKey, normalizeDomain, stableId } = require("../src/domain/normalize");
 const { parseIntent } = require("../src/domain/intent");
 const { generateHandoffMessage } = require("../src/domain/handoff");
-const { diagnose, syncWeeklyMetrics, weekStart } = require("../src/ops/metrics");
+const { diagnose, syncEmailOutreachPerformance, syncWeeklyMetrics, weekStart } = require("../src/ops/metrics");
 const { OpsService } = require("../src/ops/service");
 const { htmlTranscriptToText, parseFathomSharePage, transcriptToText } = require("../src/integrations/fathom");
 const { mergePreservingExisting } = require("../src/sheets/repository");
@@ -12,7 +12,7 @@ const { isPositiveReply, normalizeSmartleadReply } = require("../src/integration
 const { normalizeBooking } = require("../src/integrations/booking");
 const { normalizeFathomPayload } = require("../src/integrations/fathom");
 const { loadConfig, validateConfig } = require("../src/config");
-const { shouldRunMetrics } = require("../src/jobs/scheduler");
+const { shouldRunEmailOutreach, shouldRunMetrics } = require("../src/jobs/scheduler");
 const { buildValidationRequests } = require("../src/sheets/bootstrap");
 
 test("entityKey uses domain and normalized email", () => {
@@ -577,6 +577,105 @@ test("weekly metrics preview excludes completed campaigns and preserves week his
   assert.equal(result[0].row["Calls Booked"], 2);
   assert.equal(result[0].row["Input Calls"], 1);
   assert.equal(result[0].row["Open Rate"], "25.0%");
+});
+
+test("email outreach performance writes active and paused campaign totals", async () => {
+  const updates = [];
+  const repository = {
+    async read(sheetName) {
+      assert.equal(sheetName, "Deals");
+      return {
+        rows: [
+          { Campaign: "AI HealthTech", "Deal Stage": "Call Booked", "Call Booked On": "Jun 1, 2026" },
+          { Campaign: "AI HealthTech", "Deal Stage": "Input Call" },
+          { Campaign: "AI Paused", "Deal Stage": "Future Need" },
+          { Campaign: "AI Old Completed", "Deal Stage": "Call Booked" }
+        ]
+      };
+    }
+  };
+  const sheetsClient = {
+    async updateValues(sheetName, startCell, values) {
+      updates.push({ sheetName, startCell, values });
+    }
+  };
+
+  const result = await syncEmailOutreachPerformance({
+    config: {
+      smartlead: {
+        includedCampaignMatch: ["AI"],
+        excludedStatuses: ["COMPLETED", "ARCHIVED"]
+      }
+    },
+    repository,
+    sheetsClient,
+    async fetchCampaigns() {
+      return [
+        {
+          campaign_name: "AI HealthTech",
+          campaign_status: "ACTIVE",
+          total_leads: 50,
+          total_sent: 100,
+          total_replied: 8,
+          positive_replies: 3
+        },
+        {
+          campaign_name: "AI Paused",
+          campaign_status: "PAUSED",
+          total_leads: 25,
+          total_sent: 50,
+          total_replied: 5,
+          positive_replies: 1
+        },
+        {
+          campaign_name: "AI Old Completed",
+          campaign_status: "COMPLETED",
+          total_leads: 10,
+          total_sent: 20,
+          total_replied: 2,
+          positive_replies: 1
+        }
+      ];
+    }
+  });
+
+  assert.equal(result.campaigns, 2);
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].sheetName, "Metrics");
+  assert.equal(updates[0].startCell, "A50:H200");
+  assert.equal(updates[0].values.length, 151);
+  assert.deepEqual(updates[0].values[1], [
+    "Status",
+    "Campaign ID",
+    "Contacts Added",
+    "Emails Sent",
+    "Reply Rate",
+    "Positive Replies",
+    "Calls Booked",
+    "Booking Rate"
+  ]);
+  assert.equal(updates[0].values[2][0], "Grand Total");
+  assert.equal(updates[0].values[2][2], 75);
+  assert.equal(updates[0].values[2][3], 150);
+  assert.equal(updates[0].values[2][5], 4);
+  assert.equal(updates[0].values[2][6], 3);
+  assert.equal(updates[0].values[3][0], "Active");
+  assert.equal(updates[0].values[4][0], "Paused");
+});
+
+test("email outreach scheduler runs once per configured morning", () => {
+  const config = {
+    scheduler: {
+      emailOutreachSyncEnabled: true,
+      emailOutreachSyncHourUtc: 12,
+      emailOutreachSyncMinuteUtc: 0
+    }
+  };
+  const morning = new Date("2026-06-01T12:15:00Z");
+  assert.equal(shouldRunEmailOutreach(config, morning, ""), true);
+  assert.equal(shouldRunEmailOutreach(config, morning, "2026-06-01"), false);
+  assert.equal(shouldRunEmailOutreach(config, new Date("2026-06-01T11:59:00Z"), ""), false);
+  assert.equal(shouldRunEmailOutreach({ scheduler: { ...config.scheduler, emailOutreachSyncEnabled: false } }, morning, ""), false);
 });
 
 test("environment validator reports missing production secrets", () => {

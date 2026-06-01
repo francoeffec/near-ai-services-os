@@ -59,22 +59,19 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function sheetDateTime(date = new Date(), timeZone = "America/Los_Angeles") {
+function sheetDate(date = new Date(), timeZone = "America/Argentina/Buenos_Aires") {
   const value = date instanceof Date ? date : new Date(date);
   if (Number.isNaN(value.getTime())) return "";
-  const datePart = new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat("en-US", {
     timeZone,
     month: "short",
     day: "numeric",
     year: "numeric"
   }).format(value);
-  const timePart = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true
-  }).format(value);
-  return `${datePart} ${timePart}`;
+}
+
+function sheetDateTime(date = new Date(), timeZone = "America/Argentina/Buenos_Aires") {
+  return sheetDate(date, timeZone);
 }
 
 function firstNonEmpty(...values) {
@@ -101,6 +98,7 @@ module.exports = {
   normalizeDomain,
   normalizeEmail,
   nowIso,
+  sheetDate,
   sheetDateTime,
   slug,
   splitName,

@@ -51,7 +51,7 @@ function loadConfig({ strict = true } = {}) {
       apiKey: process.env.SMARTLEAD_API_KEY || "",
       baseUrl: process.env.SMARTLEAD_BASE_URL || "https://server.smartlead.ai/api/v1",
       includedCampaignMatch: optionalList("SMARTLEAD_INCLUDED_CAMPAIGN_MATCH", "AI"),
-      excludedStatuses: optionalList("SMARTLEAD_EXCLUDED_STATUSES", "PAUSED,COMPLETED,ARCHIVED"),
+      excludedStatuses: optionalList("SMARTLEAD_EXCLUDED_STATUSES", "COMPLETED,ARCHIVED"),
       timezone: process.env.SMARTLEAD_TIMEZONE || "America/Argentina/Buenos_Aires"
     },
     fathom: {
@@ -66,6 +66,9 @@ function loadConfig({ strict = true } = {}) {
       enabled: String(process.env.ENABLE_SCHEDULER || "").toLowerCase() === "true",
       metricsHourUtc: Number(process.env.WEEKLY_METRICS_SYNC_HOUR_UTC || 12),
       metricsMinuteUtc: Number(process.env.WEEKLY_METRICS_SYNC_MINUTE_UTC || 0),
+      emailOutreachSyncEnabled: String(process.env.ENABLE_EMAIL_OUTREACH_SYNC || "true").toLowerCase() === "true",
+      emailOutreachSyncHourUtc: Number(process.env.EMAIL_OUTREACH_SYNC_HOUR_UTC || 12),
+      emailOutreachSyncMinuteUtc: Number(process.env.EMAIL_OUTREACH_SYNC_MINUTE_UTC || 0),
       handoffRecapPollingEnabled: String(process.env.ENABLE_HANDOFF_RECAP_POLLING || "true").toLowerCase() === "true",
       handoffRecapPollingSeconds: Number(process.env.HANDOFF_RECAP_POLLING_SECONDS || 60)
     }

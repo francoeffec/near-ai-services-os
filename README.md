@@ -24,6 +24,7 @@ The tradeoff is that we need a deployed service and secrets, but the payoff is m
 - Sends Handoff tab recaps to Slack when `Send Handoff Recap` is checked on a row.
 - Updates owner/recruiting assignments from natural-language Slack commands.
 - Maintains sheet-derived reporting in the `Metrics` tab.
+- Refreshes Smartlead email outreach campaign performance in the `Metrics` tab every morning when `ENABLE_EMAIL_OUTREACH_SYNC=true`.
 - Stores every processed external event in the `Events` tab for traceability.
 
 ## Slack UX
@@ -89,6 +90,8 @@ The app is Docker-ready and can run on Render, Fly.io, Railway, Cloud Run, or an
 8. Use the `Metrics` tab for live pipeline reporting from the sheet data.
 
 For Handoff tab recap buttons, keep `ENABLE_HANDOFF_RECAP_POLLING=true`. The service checks the Handoff tab every `HANDOFF_RECAP_POLLING_SECONDS`, posts checked rows to `SLACK_HANDOFF_CHANNEL_ID`, records the Slack link/status/time, and clears the checkbox.
+
+For Smartlead campaign performance, keep `ENABLE_EMAIL_OUTREACH_SYNC=true` and set `SMARTLEAD_API_KEY`. The service pulls active and paused AI campaigns each morning, excludes completed/archived campaigns, and writes the `Email Outreach Performance` section in `Metrics`.
 
 Payload examples are in [docs/WEBHOOKS.md](docs/WEBHOOKS.md).
 
