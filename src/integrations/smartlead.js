@@ -75,35 +75,17 @@ async function fetchSmartleadCampaigns(config, window = {}) {
 
   if (performance.length === 0) return campaigns;
 
-  const performanceById = new Map();
-  const performanceByName = new Map();
-  for (const stats of performance) {
+  return performance.map((stats) => {
     const id = String(stats.id || stats.campaign_id || "");
     const name = String(stats.campaign_name || stats.name || "");
-    if (id) performanceById.set(id, stats);
-    if (name) performanceByName.set(name.toLowerCase(), stats);
-  }
-
-  const merged = campaigns.map((campaign) => {
-    const id = String(campaign.id || campaign.campaign_id || "");
-    const name = String(campaign.name || campaign.campaign_name || "");
-    const stats = performanceById.get(id) || performanceByName.get(name.toLowerCase()) || {};
-    return { ...campaign, ...stats };
+    const metadata = byId.get(id) || byName.get(name.toLowerCase()) || {};
+    return { ...metadata, ...stats };
   });
-
-  for (const stats of performance) {
-    const id = String(stats.id || stats.campaign_id || "");
-    const name = String(stats.campaign_name || stats.name || "");
-    if ((id && byId.has(id)) || (name && byName.has(name.toLowerCase()))) continue;
-    merged.push(stats);
-  }
-
-  return merged;
 }
 
 function campaignIncluded(config, campaign) {
   const name = String(campaign.name || campaign.campaign_name || "");
-  const status = String(campaign.status || campaign.campaign_status || campaign.status_label || "").toUpperCase();
+  const status = String(campaign.status || campaign.campaign_status || "").toUpperCase();
   const excluded = config.smartlead.excludedStatuses.some((value) => status.includes(value));
   const included = config.smartlead.includedCampaignMatch.length === 0 || config.smartlead.includedCampaignMatch.some((value) => name.toLowerCase().includes(value.toLowerCase()));
   return included && !excluded;
