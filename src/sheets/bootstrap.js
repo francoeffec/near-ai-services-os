@@ -11,18 +11,18 @@ const LEGACY_HEADER_ALIASES = {
 
 const BODY_DROPDOWNS = {
   [SHEETS.leads]: [
-    { header: "Source", range: "=Config!$C$14:$C$19" },
+    { header: "Source", range: "=Config!$C$13:$C$16" },
     { header: "Lead Stage", range: "=Config!$C$2:$C$4" },
-    { header: "Owner", range: "=Config!$C$20:$C$28" }
+    { header: "Owner", range: "=Config!$C$17:$C$25" }
   ],
   [SHEETS.deals]: [
-    { header: "Source", range: "=Config!$C$14:$C$19" },
-    { header: "Deal Stage", range: "=Config!$C$5:$C$13" },
-    { header: "Owner", range: "=Config!$C$20:$C$28" }
+    { header: "Source", range: "=Config!$C$13:$C$16" },
+    { header: "Deal Stage", range: "=Config!$C$5:$C$12" },
+    { header: "Owner", range: "=Config!$C$17:$C$25" }
   ],
   [SHEETS.handoff]: [
-    { header: "Owner", range: "=Config!$C$20:$C$28" },
-    { header: "Trigger Stage", range: "=Config!$C$29:$C$30" }
+    { header: "Owner", range: "=Config!$C$17:$C$25" },
+    { header: "Trigger Stage", range: "=Config!$C$26:$C$27" }
   ]
 };
 

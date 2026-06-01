@@ -197,13 +197,13 @@ test("bootstrap validations clear stale text-column dropdowns and reapply by hea
     const update = request.setDataValidation;
     return update?.range.sheetId === 1799443453 && update.range.startColumnIndex === 7;
   });
-  assert.equal(leadsSource.setDataValidation.rule.condition.values[0].userEnteredValue, "=Config!$C$14:$C$19");
+  assert.equal(leadsSource.setDataValidation.rule.condition.values[0].userEnteredValue, "=Config!$C$13:$C$16");
 
   const dealsStage = requests.find((request) => {
     const update = request.setDataValidation;
     return update?.range.sheetId === 639364026 && update.range.startColumnIndex === 9;
   });
-  assert.equal(dealsStage.setDataValidation.rule.condition.values[0].userEnteredValue, "=Config!$C$5:$C$13");
+  assert.equal(dealsStage.setDataValidation.rule.condition.values[0].userEnteredValue, "=Config!$C$5:$C$12");
 
   const badIdentityDropdown = requests.find((request) => {
     const update = request.setDataValidation;
@@ -267,7 +267,7 @@ test("updateDealFromCall creates a deal and lead when a Fathom call has no exist
   assert.equal(result.created, true);
   assert.equal(result.row.Company, "Pisteyo");
   assert.equal(result.row["Company Domain"], "pisteyo.com");
-  assert.equal(result.row.Source, "Fathom");
+  assert.equal(result.row.Source, "");
   assert.equal(result.row["Fathom URL"], "https://fathom.video/share/abc");
   assert.match(result.row["Skills Needed"], /n8n/);
   assert.match(result.row.Pricing, /70/);

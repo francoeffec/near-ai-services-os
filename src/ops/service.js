@@ -28,6 +28,17 @@ function slackPermalink(channelId, ts) {
   return ts ? `slack://${channelId}/${ts}` : "";
 }
 
+const ACQUISITION_SOURCES = ["Outreach", "Customer", "Referral", "Girdley Media"];
+
+function acquisitionSource(...values) {
+  for (const value of values) {
+    const cleaned = cleanText(value);
+    const match = ACQUISITION_SOURCES.find((source) => source.toLowerCase() === cleaned.toLowerCase());
+    if (match) return match;
+  }
+  return "";
+}
+
 class OpsService {
   constructor({ repository, slackClient, config }) {
     this.repository = repository;
@@ -66,7 +77,7 @@ class OpsService {
       "First Name": input.firstName || input["First Name"] || "",
       "Last Name": input.lastName || input["Last Name"] || "",
       Email: input.email || input.Email || "",
-      Source: input.source || "Slack",
+      Source: acquisitionSource(input.source, input.Source),
       Campaign: input.campaign || "",
       "Lead Stage": leadStage,
       Owner: owner,
@@ -106,7 +117,7 @@ class OpsService {
       "First Name": input.firstName || input["First Name"] || base["First Name"] || "",
       "Last Name": input.lastName || input["Last Name"] || base["Last Name"] || "",
       Email: input.email || input.Email || base.Email || "",
-      Source: input.source || input.Source || base.Source || "Slack",
+      Source: acquisitionSource(input.source, input.Source, base.Source),
       Campaign: input.campaign || input.Campaign || base.Campaign || "",
       "Deal Stage": dealStage,
       Owner: owner || base.Owner || "",
@@ -213,7 +224,7 @@ class OpsService {
       firstName: firstNonEmpty(input.firstName, base["First Name"], contact.firstName),
       lastName: firstNonEmpty(input.lastName, base["Last Name"], contact.lastName),
       email: firstNonEmpty(identity.email, base.Email),
-      source: "Fathom",
+      source: firstNonEmpty(base.Source, input.source),
       stage: firstNonEmpty(extracted.deal_stage, input.stage, base["Deal Stage"], "Call Booked"),
       callDate: firstNonEmpty(input.callDate, recording.callDate, base["Call Had Date"], base["Call Date"]),
       fathomUrl: firstNonEmpty(input.fathomUrl, recording.url, base["Fathom URL"]),
@@ -287,7 +298,7 @@ class OpsService {
       await this.repository.upsert(SHEETS.handoff, "Handoff ID", handoffId, { ...handoffRow, __clear: ["Slack Handoff Link"] }, "Handoff ID", "handoff");
     }
 
-    await this.createDeal({ ...deal, company: deal.Company, email: deal.Email, handoffStatus: slackLink ? "Posted" : "Ready", source: "Slack" });
+    await this.createDeal({ ...deal, company: deal.Company, email: deal.Email, handoffStatus: slackLink ? "Posted" : "Ready" });
     return { ...result, message, slackLink };
   }
 

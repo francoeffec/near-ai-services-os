@@ -6,7 +6,6 @@ const STAGE_ALIASES = [
   ["future need", "Future Need"],
   ["input call", "Input Call"],
   ["handoff", "Input Call"],
-  ["qualified", "Qualified"],
   ["considering", "Considering"],
   ["call booked", "Call Booked"],
   ["booked", "Call Booked"],

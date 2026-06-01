@@ -46,7 +46,7 @@ async function syncWeeklyMetrics({ config, repository, fetchCampaigns = fetchSma
     const campaignName = campaign.name || campaign.campaign_name || campaign.title || "";
     const campaignId = campaign.id || campaign.campaign_id || "";
     const deals = dealsTable.rows.filter((row) => String(row.Campaign || "").toLowerCase() === String(campaignName).toLowerCase());
-    const callsBooked = deals.filter((row) => ["Call Booked", "Qualified", "Input Call", "Contract Signed"].includes(row["Deal Stage"])).length;
+    const callsBooked = deals.filter((row) => ["Call Booked", "Considering", "Input Call", "Contract Signed"].includes(row["Deal Stage"])).length;
     const inputCalls = deals.filter((row) => row["Deal Stage"] === "Input Call").length;
     const signed = deals.filter((row) => row["Deal Stage"] === "Contract Signed").length;
 
