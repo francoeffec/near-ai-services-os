@@ -139,7 +139,7 @@ class OpsService {
     };
 
     const result = await this.repository.upsert(SHEETS.deals, "Entity Key", key, row, "Deal ID", "deal");
-    await this.addLead({
+    const leadResult = await this.addLead({
       ...row,
       company: row.Company,
       companyDomain: row["Company Domain"],
@@ -161,7 +161,7 @@ class OpsService {
       summary: `${result.created ? "Created" : "Updated"} deal ${row.Company || key}`,
       rawPayload: input
     });
-    return result;
+    return { ...result, leadResult };
   }
 
   async assignOwner(input) {

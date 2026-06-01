@@ -7,7 +7,7 @@ const { diagnose, syncWeeklyMetrics, weekStart } = require("../src/ops/metrics")
 const { OpsService } = require("../src/ops/service");
 const { htmlTranscriptToText, parseFathomSharePage, transcriptToText } = require("../src/integrations/fathom");
 const { mergePreservingExisting } = require("../src/sheets/repository");
-const { inferCompanyFromThread } = require("../src/slack/app");
+const { handleIntent, inferCompanyFromThread } = require("../src/slack/app");
 const { isPositiveReply, normalizeSmartleadReply } = require("../src/integrations/smartlead");
 const { normalizeBooking } = require("../src/integrations/booking");
 const { normalizeFathomPayload } = require("../src/integrations/fathom");
@@ -265,6 +265,7 @@ test("updateDealFromCall creates a deal and lead when a Fathom call has no exist
   });
 
   assert.equal(result.created, true);
+  assert.equal(result.leadResult.created, true);
   assert.equal(result.row.Company, "Pisteyo");
   assert.equal(result.row["Company Domain"], "pisteyo.com");
   assert.equal(result.row.Source, "");
@@ -275,6 +276,32 @@ test("updateDealFromCall creates a deal and lead when a Fathom call has no exist
   assert.equal(upserts[1].sheetName, "Leads");
   assert.equal(upserts[1].row["Lead Stage"], "Call Booked");
   assert.equal(events.at(-1).eventType, "deal_upserted");
+});
+
+test("Fathom Slack replies recap deal, lead, and filled fields", async () => {
+  const text = await handleIntent({
+    intent: { type: "update_deal_from_call", fathomUrl: "https://fathom.video/share/abc" },
+    opsService: {
+      async updateDealFromCall() {
+        return {
+          created: false,
+          leadResult: { created: true, row: { Company: "Pisteyo" } },
+          row: {
+            Company: "Pisteyo",
+            "Fathom URL": "https://fathom.video/share/abc",
+            Pricing: "$70/hr",
+            "Skills Needed": "n8n, Airtable",
+            "Next Steps": "Send recap"
+          }
+        };
+      }
+    }
+  });
+
+  assert.equal(
+    text,
+    "Fathom update for Pisteyo: updated the deal and created the lead. Filled/confirmed: Fathom URL, pricing, skills needed, next steps."
+  );
 });
 
 test("inferCompanyFromThread finds company in prior Slack context", async () => {

@@ -1,4 +1,5 @@
 const { parseIntent } = require("../domain/intent");
+const { cleanText } = require("../domain/normalize");
 
 async function fetchTextFile(file, botToken) {
   if (!file?.url_private || !botToken) return "";
@@ -65,6 +66,37 @@ function allowed(config, body) {
   return userAllowed && channelAllowed;
 }
 
+function actionWord(result) {
+  return result?.created ? "created" : "updated";
+}
+
+function readableFieldList(row) {
+  const fields = [
+    ["Call Had Date", "call date"],
+    ["Fathom URL", "Fathom URL"],
+    ["Pricing", "pricing"],
+    ["Hours/Week", "hours/week"],
+    ["Engineer Type", "engineer type"],
+    ["Skills Needed", "skills needed"],
+    ["Project Scope", "project scope"],
+    ["Start Date", "start date"],
+    ["Next Steps", "next steps"],
+    ["Notes", "notes"]
+  ];
+  return fields
+    .filter(([header]) => cleanText(row?.[header]))
+    .map(([, label]) => label);
+}
+
+function fathomUpdateText(result) {
+  const company = result.row.Company || result.row["Entity Key"] || "the company";
+  const dealAction = actionWord(result);
+  const leadAction = result.leadResult ? actionWord(result.leadResult) : "synced";
+  const fieldLabels = readableFieldList(result.row).slice(0, 6);
+  const fieldText = fieldLabels.length ? ` Filled/confirmed: ${fieldLabels.join(", ")}.` : "";
+  return `Fathom update for ${company}: ${dealAction} the deal and ${leadAction} the lead.${fieldText}`;
+}
+
 async function handleIntent({ intent, opsService }) {
   switch (intent.type) {
     case "add_lead": {
@@ -97,7 +129,7 @@ async function handleIntent({ intent, opsService }) {
     }
     case "update_deal_from_call": {
       const result = await opsService.updateDealFromCall(intent);
-      return `${result.created ? "Created" : "Updated"} ${result.row.Company} from the Fathom call. I also synced the lead row.`;
+      return fathomUpdateText(result);
     }
     case "help":
       return helpText();
@@ -176,4 +208,4 @@ function createSlackApp({ config, opsService }) {
   return { app, receiver };
 }
 
-module.exports = { collectAttachedText, createSlackApp, handleIntent, helpText, inferCompanyFromThread };
+module.exports = { collectAttachedText, createSlackApp, fathomUpdateText, handleIntent, helpText, inferCompanyFromThread };
