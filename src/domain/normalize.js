@@ -59,6 +59,24 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function sheetDateTime(date = new Date(), timeZone = "America/Los_Angeles") {
+  const value = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(value.getTime())) return "";
+  const datePart = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  }).format(value);
+  const timePart = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true
+  }).format(value);
+  return `${datePart} ${timePart}`;
+}
+
 function firstNonEmpty(...values) {
   for (const value of values) {
     const cleaned = cleanText(value);
@@ -83,6 +101,7 @@ module.exports = {
   normalizeDomain,
   normalizeEmail,
   nowIso,
+  sheetDateTime,
   slug,
   splitName,
   stableId

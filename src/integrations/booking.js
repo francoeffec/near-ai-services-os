@@ -15,6 +15,7 @@ function normalizeBooking(payload) {
     source: firstNonEmpty(payload.source, booking.source, "Chili Piper"),
     campaign: firstNonEmpty(payload.campaign, booking.campaign, booking.meeting_type, booking.event_type),
     callDate: firstNonEmpty(booking.start_time, booking.start, booking.date, payload.start_time),
+    callBookedOn: firstNonEmpty(booking.booked_at, booking.bookedAt, booking.created_at, booking.createdAt, payload.booked_at, payload.created_at, payload.timestamp, payload.received_at),
     callStatus: "Scheduled",
     stage: "Call Booked",
     notes: firstNonEmpty(payload.notes, booking.notes, booking.description)

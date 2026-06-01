@@ -191,25 +191,31 @@ test("bootstrap validations clear stale text-column dropdowns and reapply by hea
 
   const leadsClear = requests.find((request) => request.setDataValidation?.range.sheetId === 1799443453 && !request.setDataValidation.rule);
   assert.equal(leadsClear.setDataValidation.range.startColumnIndex, 0);
-  assert.equal(leadsClear.setDataValidation.range.endColumnIndex, 21);
+  assert.equal(leadsClear.setDataValidation.range.endColumnIndex, 16);
 
   const leadsSource = requests.find((request) => {
     const update = request.setDataValidation;
     return update?.range.sheetId === 1799443453 && update.range.startColumnIndex === 7;
   });
-  assert.equal(leadsSource.setDataValidation.rule.condition.values[0].userEnteredValue, "=Config!$C$15:$C$18");
+  assert.equal(leadsSource.setDataValidation.rule.condition.values[0].userEnteredValue, "=Config!$C$14:$C$19");
 
   const dealsStage = requests.find((request) => {
     const update = request.setDataValidation;
     return update?.range.sheetId === 639364026 && update.range.startColumnIndex === 9;
   });
-  assert.equal(dealsStage.setDataValidation.rule.condition.values[0].userEnteredValue, "=Config!$C$7:$C$14");
+  assert.equal(dealsStage.setDataValidation.rule.condition.values[0].userEnteredValue, "=Config!$C$5:$C$13");
 
   const badIdentityDropdown = requests.find((request) => {
     const update = request.setDataValidation;
     return update?.rule && update.range.sheetId === 639364026 && [4, 5, 6].includes(update.range.startColumnIndex);
   });
   assert.equal(badIdentityDropdown, undefined);
+
+  const handoffRecapCheckbox = requests.find((request) => {
+    const update = request.setDataValidation;
+    return update?.range.sheetId === 746939414 && update.range.startColumnIndex === 4;
+  });
+  assert.equal(handoffRecapCheckbox.setDataValidation.rule.condition.type, "BOOLEAN");
 });
 
 test("updateDealFromCall creates a deal and lead when a Fathom call has no existing deal", async () => {
@@ -388,6 +394,68 @@ test("moveToHandoff posts when existing handoff link is only the source thread",
   assert.equal(handoffRows[1]["Slack Handoff Link"], "slack://C1/999.000");
 });
 
+test("processPendingHandoffRecaps posts checked handoff rows and resets action fields", async () => {
+  const updates = [];
+  const events = [];
+  const repository = {
+    async read(sheetName) {
+      assert.equal(sheetName, "Handoff");
+      return {
+        headers: [],
+        rows: [
+          {
+            _rowNumber: 2,
+            "Handoff ID": "handoff_1",
+            Company: "CP Brands",
+            "Send Handoff Recap": true,
+            "Client/Contact": "Dionelis Pantoja",
+            Email: "dionelisp@example.com",
+            Owner: "Camila Bagnati",
+            "Engineer Type": "AI Automation Engineer",
+            "Skills Needed": "Zapier, APIs",
+            "Hours/Week": "20",
+            "Start Date": "Jun 15, 2026",
+            Pricing: "$4,000/mo",
+            "Project Description": "Automate reporting workflows.",
+            "Candidate/Profile Requirements": "Strong Zapier and API experience.",
+            "Next Steps": "Send profiles."
+          }
+        ]
+      };
+    },
+    async updateRowByNumber(sheetName, rowNumber, row) {
+      updates.push({ sheetName, rowNumber, row });
+      return { row, created: false };
+    },
+    async addEvent(event) {
+      events.push(event);
+    }
+  };
+  const slackClient = {
+    chat: {
+      async postMessage({ channel, text }) {
+        assert.equal(channel, "C-handoff");
+        assert.match(text, /AI Services handoff: CP Brands/);
+        assert.match(text, /Candidate\/profile requirements/);
+        return { ts: "123.456" };
+      }
+    }
+  };
+  const service = new OpsService({
+    repository,
+    slackClient,
+    config: { slack: { handoffChannelId: "C-handoff" } }
+  });
+
+  const result = await service.processPendingHandoffRecaps();
+  assert.deepEqual(result, [{ ok: true, company: "CP Brands", slackLink: "slack://C-handoff/123.456" }]);
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].row["Send Handoff Recap"], false);
+  assert.equal(updates[0].row["Recap Status"], "Sent");
+  assert.equal(updates[0].row["Slack Handoff Link"], "slack://C-handoff/123.456");
+  assert.equal(events[0].eventType, "handoff_recap_sent");
+});
+
 test("Smartlead positive reply payload normalizes into lead fields", () => {
   const payload = {
     event_id: "reply_1",
@@ -456,7 +524,7 @@ test("Fathom payload normalizes transcript and recording identity", () => {
   assert.equal(payload.transcriptText, "Client: Need Zapier and APIs.");
 });
 
-test("weekly metrics sync excludes completed campaigns and preserves week history key", async () => {
+test("weekly metrics preview excludes completed campaigns and preserves week history key", async () => {
   const upserts = [];
   const repository = {
     async read(sheetName) {
@@ -504,11 +572,11 @@ test("weekly metrics sync excludes completed campaigns and preserves week histor
     }
   });
   assert.equal(result.length, 1);
-  assert.equal(upserts[0].keyHeader, "Metric ID");
-  assert.equal(upserts[0].keyValue, "2026-05-25:camp_1");
-  assert.equal(upserts[0].row["Calls Booked"], 2);
-  assert.equal(upserts[0].row["Input Calls"], 1);
-  assert.equal(upserts[0].row["Open Rate"], "25.0%");
+  assert.equal(upserts.length, 0);
+  assert.equal(result[0].key, "2026-05-25:camp_1");
+  assert.equal(result[0].row["Calls Booked"], 2);
+  assert.equal(result[0].row["Input Calls"], 1);
+  assert.equal(result[0].row["Open Rate"], "25.0%");
 });
 
 test("environment validator reports missing production secrets", () => {

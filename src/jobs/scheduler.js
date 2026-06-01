@@ -12,25 +12,39 @@ function shouldRunMetrics(config, now, lastRunKey) {
   return lastRunKey !== todayKey(now);
 }
 
-function startScheduler({ config, repository }) {
-  if (!config.scheduler.enabled) return { stop() {} };
+function startScheduler({ config, repository, opsService }) {
+  const timers = [];
 
   let lastMetricsRun = "";
-  const timer = setInterval(async () => {
-    const now = new Date();
-    if (!shouldRunMetrics(config, now, lastMetricsRun)) return;
-    lastMetricsRun = todayKey(now);
-    try {
-      await syncWeeklyMetrics({ config, repository, date: now });
-      console.log(`Weekly metrics synced at ${now.toISOString()}`);
-    } catch (error) {
-      console.error("Weekly metrics sync failed", error);
-    }
-  }, 60 * 1000);
+  if (config.scheduler.enabled) {
+    timers.push(setInterval(async () => {
+      const now = new Date();
+      if (!shouldRunMetrics(config, now, lastMetricsRun)) return;
+      lastMetricsRun = todayKey(now);
+      try {
+        await syncWeeklyMetrics({ config, repository, date: now });
+        console.log(`Weekly metrics synced at ${now.toISOString()}`);
+      } catch (error) {
+        console.error("Weekly metrics sync failed", error);
+      }
+    }, 60 * 1000));
+  }
+
+  if (config.scheduler.handoffRecapPollingEnabled && opsService) {
+    const intervalMs = Math.max(15, config.scheduler.handoffRecapPollingSeconds || 60) * 1000;
+    timers.push(setInterval(async () => {
+      try {
+        const results = await opsService.processPendingHandoffRecaps();
+        if (results.length) console.log(`Processed ${results.length} pending handoff recap request(s)`);
+      } catch (error) {
+        console.error("Handoff recap polling failed", error);
+      }
+    }, intervalMs));
+  }
 
   return {
     stop() {
-      clearInterval(timer);
+      timers.forEach((timer) => clearInterval(timer));
     }
   };
 }

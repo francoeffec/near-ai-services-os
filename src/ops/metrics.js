@@ -1,6 +1,5 @@
 const { SHEETS } = require("../schema");
 const { campaignIncluded, fetchSmartleadCampaigns } = require("../integrations/smartlead");
-const { nowIso } = require("../domain/normalize");
 
 function weekStart(date = new Date()) {
   const copy = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
@@ -41,14 +40,13 @@ async function syncWeeklyMetrics({ config, repository, fetchCampaigns = fetchSma
   const included = campaigns.filter((campaign) => campaignIncluded(config, campaign));
   const dealsTable = await repository.read(SHEETS.deals);
   const week = startDate;
-  const syncedAt = nowIso();
   const results = [];
 
   for (const campaign of included) {
     const campaignName = campaign.name || campaign.campaign_name || campaign.title || "";
     const campaignId = campaign.id || campaign.campaign_id || "";
     const deals = dealsTable.rows.filter((row) => String(row.Campaign || "").toLowerCase() === String(campaignName).toLowerCase());
-    const callsBooked = deals.filter((row) => ["Call Booked", "Intro Call", "Qualified", "Input Call", "Contract Signed"].includes(row["Deal Stage"])).length;
+    const callsBooked = deals.filter((row) => ["Call Booked", "Qualified", "Input Call", "Contract Signed"].includes(row["Deal Stage"])).length;
     const inputCalls = deals.filter((row) => row["Deal Stage"] === "Input Call").length;
     const signed = deals.filter((row) => row["Deal Stage"] === "Contract Signed").length;
 
@@ -74,12 +72,10 @@ async function syncWeeklyMetrics({ config, repository, fetchCampaigns = fetchSma
       "Open Rate": rate(opened, sent),
       "Reply Rate": rate(replied, sent),
       "Positive Reply Rate": rate(positive, sent),
-      "Booking Rate": rate(callsBooked, sent),
-      "Last Synced At": syncedAt
+      "Booking Rate": rate(callsBooked, sent)
     };
     row.Diagnosis = diagnose(row);
-    const result = await repository.upsert(SHEETS.weeklyMetrics, "Metric ID", key, row);
-    results.push({ key, created: result.created, campaign: campaignName });
+    results.push({ key, campaign: campaignName, row });
   }
 
   return results;

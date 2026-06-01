@@ -89,7 +89,6 @@ function attachRoutes({ receiver, config, opsService, repository, sheetsClient }
         companyDomain: payload.companyDomain,
         email: payload.email,
         fathomUrl: payload.url,
-        fathomRecordingId: payload.recordingId,
         transcriptText,
         sourceEventId: payload.sourceEventId,
         autoCreateDeal: true
@@ -114,6 +113,16 @@ function attachRoutes({ receiver, config, opsService, repository, sheetsClient }
     if (!requireAdmin(config, req, res)) return;
     try {
       const result = await syncWeeklyMetrics({ config, repository });
+      res.json({ ok: true, result });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: error.message });
+    }
+  });
+
+  app.post("/jobs/handoff-recaps", async (req, res) => {
+    if (!requireAdmin(config, req, res)) return;
+    try {
+      const result = await opsService.processPendingHandoffRecaps();
       res.json({ ok: true, result });
     } catch (error) {
       res.status(500).json({ ok: false, error: error.message });

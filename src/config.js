@@ -65,7 +65,9 @@ function loadConfig({ strict = true } = {}) {
     scheduler: {
       enabled: String(process.env.ENABLE_SCHEDULER || "").toLowerCase() === "true",
       metricsHourUtc: Number(process.env.WEEKLY_METRICS_SYNC_HOUR_UTC || 12),
-      metricsMinuteUtc: Number(process.env.WEEKLY_METRICS_SYNC_MINUTE_UTC || 0)
+      metricsMinuteUtc: Number(process.env.WEEKLY_METRICS_SYNC_MINUTE_UTC || 0),
+      handoffRecapPollingEnabled: String(process.env.ENABLE_HANDOFF_RECAP_POLLING || "true").toLowerCase() === "true",
+      handoffRecapPollingSeconds: Number(process.env.HANDOFF_RECAP_POLLING_SECONDS || 60)
     }
   };
 }

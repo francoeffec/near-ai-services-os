@@ -2,7 +2,7 @@ const { SHEETS } = require("../schema");
 const { extractCallFields } = require("../ai/extract");
 const { generateHandoffMessage } = require("../domain/handoff");
 const { fetchFathomRecording } = require("../integrations/fathom");
-const { cleanText, entityKey, firstNonEmpty, nowIso, splitName, stableId } = require("../domain/normalize");
+const { cleanText, entityKey, firstNonEmpty, nowIso, sheetDateTime, splitName, stableId } = require("../domain/normalize");
 
 function isLikelyTranscript(text) {
   const value = String(text || "");
@@ -17,6 +17,15 @@ function callExtractionText({ recording = {}, transcriptText = "", fallbackText 
     recording.callDate ? `Call date: ${recording.callDate}` : ""
   ].filter(Boolean).join("\n");
   return [metadata, transcriptText || fallbackText].filter(Boolean).join("\n\nTranscript:\n");
+}
+
+function isChecked(value) {
+  if (value === true) return true;
+  return ["true", "yes", "y", "send", "1", "x"].includes(cleanText(value).toLowerCase());
+}
+
+function slackPermalink(channelId, ts) {
+  return ts ? `slack://${channelId}/${ts}` : "";
 }
 
 class OpsService {
@@ -49,6 +58,7 @@ class OpsService {
       throw new Error("A lead needs at least a company, company domain, or contact email.");
     }
     const owner = await this.canonicalOwner(input.owner || input.Owner);
+    const leadStage = input.stage || input.leadStage || input["Lead Stage"] || "Replied Positive";
     const row = {
       "Entity Key": key,
       Company: input.company || input.Company,
@@ -58,16 +68,11 @@ class OpsService {
       Email: input.email || input.Email || "",
       Source: input.source || "Slack",
       Campaign: input.campaign || "",
-      "Lead Stage": input.stage || input.leadStage || "Positive Response",
+      "Lead Stage": leadStage,
       Owner: owner,
-      "Smartlead Campaign ID": input.campaignId || "",
-      "Smartlead Lead ID": input.smartleadLeadId || "",
-      "Last Reply At": input.lastReplyAt || "",
-      "Reply Summary": input.replySummary || "",
-      Notes: input.notes || "",
-      "Next Step": input.nextStep || "",
-      "Slack Thread": input.slackThread || "",
-      "Source Event ID": input.sourceEventId || input["Source Event ID"] || ""
+      "Call Booked On": firstNonEmpty(input.callBookedOn, input["Call Booked On"], input.bookedAt),
+      Notes: firstNonEmpty(input.notes, input.Notes, input.replySummary),
+      "Next Step": input.nextStep || ""
     };
 
     const result = await this.repository.upsert(SHEETS.leads, "Entity Key", key, row, "Lead ID", "lead");
@@ -93,6 +98,7 @@ class OpsService {
       throw new Error("A deal needs at least a company, company domain, or contact email.");
     }
     const owner = await this.canonicalOwner(input.owner || input.Owner);
+    const dealStage = input.stage || input.dealStage || input["Deal Stage"] || base["Deal Stage"] || "Call Booked";
     const row = {
       "Entity Key": key,
       Company: input.company || input.Company || base.Company,
@@ -102,12 +108,12 @@ class OpsService {
       Email: input.email || input.Email || base.Email || "",
       Source: input.source || input.Source || base.Source || "Slack",
       Campaign: input.campaign || input.Campaign || base.Campaign || "",
-      "Deal Stage": input.stage || input.dealStage || input["Deal Stage"] || base["Deal Stage"] || "Call Booked",
+      "Deal Stage": dealStage,
       Owner: owner || base.Owner || "",
-      "Call Date": input.callDate || input["Call Date"] || base["Call Date"] || "",
+      "Call Had Date": firstNonEmpty(input.callDate, input["Call Had Date"], input["Call Date"], base["Call Had Date"], base["Call Date"]),
+      "Call Booked On": firstNonEmpty(input.callBookedOn, input["Call Booked On"], input.bookedAt, base["Call Booked On"]),
       "Call Status": input.callStatus || base["Call Status"] || "",
       "Fathom URL": input.fathomUrl || input["Fathom URL"] || base["Fathom URL"] || "",
-      "Fathom Recording ID": input.fathomRecordingId || input["Fathom Recording ID"] || base["Fathom Recording ID"] || "",
       Pricing: input.pricing || input.Pricing || base.Pricing || "",
       "Hours/Week": input.hoursPerWeek || input["Hours/Week"] || base["Hours/Week"] || "",
       "Engineer Type": input.engineerType || input["Engineer Type"] || base["Engineer Type"] || "",
@@ -118,9 +124,7 @@ class OpsService {
       "If Lost Reason": input.ifLostReason || input["If Lost Reason"] || base["If Lost Reason"] || "",
       "Next Steps": input.nextSteps || input["Next Steps"] || base["Next Steps"] || "",
       Notes: input.notes || input.Notes || base.Notes || "",
-      "Slack Thread": input.slackThread || input["Slack Thread"] || base["Slack Thread"] || "",
-      "Handoff Status": input.handoffStatus || base["Handoff Status"] || "",
-      "Source Event ID": input.sourceEventId || input["Source Event ID"] || base["Source Event ID"] || ""
+      "Handoff Status": input.handoffStatus || base["Handoff Status"] || ""
     };
 
     const result = await this.repository.upsert(SHEETS.deals, "Entity Key", key, row, "Deal ID", "deal");
@@ -211,9 +215,8 @@ class OpsService {
       email: firstNonEmpty(identity.email, base.Email),
       source: "Fathom",
       stage: firstNonEmpty(extracted.deal_stage, input.stage, base["Deal Stage"], "Call Booked"),
-      callDate: firstNonEmpty(input.callDate, recording.callDate, base["Call Date"]),
+      callDate: firstNonEmpty(input.callDate, recording.callDate, base["Call Had Date"], base["Call Date"]),
       fathomUrl: firstNonEmpty(input.fathomUrl, recording.url, base["Fathom URL"]),
-      fathomRecordingId: firstNonEmpty(input.fathomRecordingId, recording.recordingId, base["Fathom Recording ID"]),
       pricing: firstNonEmpty(extracted.pricing, base.Pricing),
       hoursPerWeek: firstNonEmpty(extracted.hours_per_week, base["Hours/Week"]),
       engineerType: firstNonEmpty(extracted.engineer_type, base["Engineer Type"]),
@@ -243,6 +246,10 @@ class OpsService {
       "Deal ID": deal["Deal ID"],
       "Entity Key": key,
       Company: deal.Company,
+      "Send Handoff Recap": false,
+      "Recap Status": input["Recap Status"] || "Ready",
+      "Recap Sent At": input["Recap Sent At"] || "",
+      "Recap Error": "",
       "Client/Contact": [deal["First Name"], deal["Last Name"]].map(cleanText).filter(Boolean).join(" "),
       Email: deal.Email,
       Owner: deal.Owner,
@@ -282,6 +289,74 @@ class OpsService {
 
     await this.createDeal({ ...deal, company: deal.Company, email: deal.Email, handoffStatus: slackLink ? "Posted" : "Ready", source: "Slack" });
     return { ...result, message, slackLink };
+  }
+
+  async updateHandoffRow(row, patch) {
+    const next = { ...row, ...patch };
+    if (this.repository.updateRowByNumber && row._rowNumber) {
+      return this.repository.updateRowByNumber(SHEETS.handoff, row._rowNumber, next);
+    }
+    const key = next["Handoff ID"] || stableId("handoff", next["Entity Key"] || entityKey(next) || next.Company);
+    next["Handoff ID"] = key;
+    return this.repository.upsert(SHEETS.handoff, "Handoff ID", key, next, "Handoff ID", "handoff");
+  }
+
+  async sendHandoffRecap(handoffRow) {
+    if (!this.slackClient || !this.config.slack.handoffChannelId) {
+      throw new Error("Slack handoff channel is not configured.");
+    }
+    const channel = this.config.slack.handoffChannelId;
+    const message = generateHandoffMessage(handoffRow);
+    const posted = await this.slackClient.chat.postMessage({ channel, text: message });
+    const slackLink = slackPermalink(channel, posted.ts);
+    const result = await this.updateHandoffRow(handoffRow, {
+      "Send Handoff Recap": false,
+      "Recap Status": "Sent",
+      "Recap Sent At": sheetDateTime(),
+      "Recap Error": "",
+      "Slack Handoff Link": slackLink || handoffRow["Slack Handoff Link"] || ""
+    });
+    await this.repository.addEvent?.({
+      eventId: stableId("event", `handoff_recap:${handoffRow["Handoff ID"] || handoffRow.Company}:${nowIso()}`),
+      source: "Sheets",
+      eventType: "handoff_recap_sent",
+      entityKey: handoffRow["Entity Key"] || "",
+      status: "processed",
+      summary: `Sent handoff recap for ${handoffRow.Company || "handoff row"}`,
+      rawPayload: { handoffId: handoffRow["Handoff ID"], company: handoffRow.Company, slackLink }
+    });
+    return { ...result, message, slackLink };
+  }
+
+  async processPendingHandoffRecaps({ limit = 20 } = {}) {
+    const table = await this.repository.read(SHEETS.handoff);
+    const pending = table.rows.filter((row) => isChecked(row["Send Handoff Recap"])).slice(0, limit);
+    const results = [];
+
+    for (const row of pending) {
+      try {
+        const result = await this.sendHandoffRecap(row);
+        results.push({ ok: true, company: row.Company, slackLink: result.slackLink });
+      } catch (error) {
+        await this.updateHandoffRow(row, {
+          "Send Handoff Recap": false,
+          "Recap Status": "Error",
+          "Recap Error": error.message
+        });
+        await this.repository.addEvent?.({
+          eventId: stableId("event", `handoff_recap_error:${row["Handoff ID"] || row.Company}:${nowIso()}`),
+          source: "Sheets",
+          eventType: "handoff_recap_error",
+          entityKey: row["Entity Key"] || "",
+          status: "error",
+          summary: `Failed to send handoff recap for ${row.Company || "handoff row"}: ${error.message}`,
+          rawPayload: { handoffId: row["Handoff ID"], company: row.Company }
+        });
+        results.push({ ok: false, company: row.Company, error: error.message });
+      }
+    }
+
+    return results;
   }
 
   async resolveDeal(input) {

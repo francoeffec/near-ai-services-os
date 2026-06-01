@@ -59,7 +59,7 @@ async function extractCallFieldsWithOpenAI(config, transcriptText) {
       messages: [
         {
           role: "system",
-          content: "Extract NearAI Services deal fields from a sales call transcript. The company and contact should be the external prospect, not Near. Use empty strings when the transcript does not support a field. Do not invent facts."
+          content: "Extract NearAI Services deal fields from a sales call transcript. The company and contact should be the external prospect, not Near. Use deal_stage only from: Cancelled, Call Booked, Qualified, Unqualified, Considering, Input Call, Contract Signed, Lost, Future Need. Use empty strings when the transcript does not support a field. Do not invent facts."
         },
         {
           role: "user",

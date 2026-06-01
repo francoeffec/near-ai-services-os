@@ -21,8 +21,9 @@ The tradeoff is that we need a deployed service and secrets, but the payoff is m
 - Creates deals from Slack, Chili Piper/Zapier booking payloads, or calendar-style booking payloads.
 - Creates or updates deals and lead rows from Fathom share URLs, transcript payloads, or pasted/attached call notes in Slack.
 - Moves deals to handoff and generates a Slack handoff message.
+- Sends Handoff tab recaps to Slack when `Send Handoff Recap` is checked on a row.
 - Updates owner/recruiting assignments from natural-language Slack commands.
-- Maintains weekly Smartlead and sheet-derived reporting.
+- Maintains sheet-derived reporting in the `Metrics` tab.
 - Stores every processed external event in the `Events` tab for traceability.
 
 ## Slack UX
@@ -42,11 +43,10 @@ Assign Kelvin to Apple.
 
 The service expects these tabs:
 
-- `Funnel`
 - `Leads`
 - `Deals`
 - `Handoff`
-- `Weekly Metrics`
+- `Metrics`
 - `Events`
 - `Config`
 
@@ -86,10 +86,9 @@ The app is Docker-ready and can run on Render, Fly.io, Railway, Cloud Run, or an
    - Smartlead positive replies to `/webhooks/smartlead?secret=...`
    - Chili Piper/Zapier booking payloads to `/webhooks/chili-piper?secret=...`
    - Fathom transcript payloads to `/webhooks/fathom?secret=...`
-8. Configure a cron job:
-   - `POST /jobs/weekly-metrics?token=ADMIN_TOKEN`
+8. Use the `Metrics` tab for live pipeline reporting from the sheet data.
 
-You can also set `ENABLE_SCHEDULER=true` for an in-process Monday metrics sync. I still recommend an external cron as the primary production trigger because external cron survives process restarts more predictably.
+For Handoff tab recap buttons, keep `ENABLE_HANDOFF_RECAP_POLLING=true`. The service checks the Handoff tab every `HANDOFF_RECAP_POLLING_SECONDS`, posts checked rows to `SLACK_HANDOFF_CHANNEL_ID`, records the Slack link/status/time, and clears the checkbox.
 
 Payload examples are in [docs/WEBHOOKS.md](docs/WEBHOOKS.md).
 

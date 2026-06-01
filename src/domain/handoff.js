@@ -14,10 +14,11 @@ function generateHandoffMessage(deal) {
   const hours = cleanText(deal["Hours/Week"]) || cleanText(deal.Hours) || "TBD";
   const startDate = cleanText(deal["Start Date"]) || "TBD";
   const pricing = cleanText(deal.Pricing) || "TBD";
-  const scope = firstNonEmpty(deal["Project Scope"], deal.Notes, "No scope notes yet.");
+  const scope = firstNonEmpty(deal["Project Scope"], deal["Project Description"], deal["Call Notes"], deal.Notes, "No scope notes yet.");
+  const requirements = cleanText(deal["Candidate/Profile Requirements"]);
   const nextSteps = cleanText(deal["Next Steps"]) || "Confirm recruiting next step.";
 
-  return [
+  const lines = [
     `*AI Services handoff: ${company}*`,
     `Contact: ${contact}${deal.Email ? ` (${cleanText(deal.Email)})` : ""}`,
     `Owner: ${owner}`,
@@ -29,8 +30,10 @@ function generateHandoffMessage(deal) {
     `Pricing: ${pricing}`,
     "",
     `Project scope: ${scope}`,
-    `Next steps: ${nextSteps}`
-  ].join("\n");
+  ];
+  if (requirements) lines.push(`Candidate/profile requirements: ${requirements}`);
+  lines.push(`Next steps: ${nextSteps}`);
+  return lines.join("\n");
 }
 
 module.exports = { generateHandoffMessage };

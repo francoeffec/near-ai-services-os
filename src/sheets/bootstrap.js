@@ -1,9 +1,9 @@
 const { CONFIG_ROWS, SCHEMAS, SHEETS } = require("../schema");
-const { cleanText, entityKey, nowIso, stableId } = require("../domain/normalize");
+const { cleanText, entityKey, sheetDateTime, stableId } = require("../domain/normalize");
 
 const LEGACY_HEADER_ALIASES = {
   Stage: "Deal Stage",
-  "Call Had Date": "Call Date",
+  "Call Date": "Call Had Date",
   "Engineer ": "Owner",
   Engineer: "Owner",
   Hours: "Hours/Week"
@@ -11,19 +11,23 @@ const LEGACY_HEADER_ALIASES = {
 
 const BODY_DROPDOWNS = {
   [SHEETS.leads]: [
-    { header: "Source", range: "=Config!$C$15:$C$18" },
-    { header: "Lead Stage", range: "=Config!$C$2:$C$6" },
-    { header: "Owner", range: "=Config!$C$19:$C$21" }
+    { header: "Source", range: "=Config!$C$14:$C$19" },
+    { header: "Lead Stage", range: "=Config!$C$2:$C$4" },
+    { header: "Owner", range: "=Config!$C$20:$C$28" }
   ],
   [SHEETS.deals]: [
-    { header: "Source", range: "=Config!$C$15:$C$18" },
-    { header: "Deal Stage", range: "=Config!$C$7:$C$14" },
-    { header: "Owner", range: "=Config!$C$19:$C$21" }
+    { header: "Source", range: "=Config!$C$14:$C$19" },
+    { header: "Deal Stage", range: "=Config!$C$5:$C$13" },
+    { header: "Owner", range: "=Config!$C$20:$C$28" }
   ],
   [SHEETS.handoff]: [
-    { header: "Owner", range: "=Config!$C$19:$C$21" },
-    { header: "Trigger Stage", range: "=Config!$C$22:$C$23" }
+    { header: "Owner", range: "=Config!$C$20:$C$28" },
+    { header: "Trigger Stage", range: "=Config!$C$29:$C$30" }
   ]
+};
+
+const BODY_CHECKBOXES = {
+  [SHEETS.handoff]: ["Send Handoff Recap"]
 };
 
 function dropdownRule(range) {
@@ -31,6 +35,16 @@ function dropdownRule(range) {
     condition: {
       type: "ONE_OF_RANGE",
       values: [{ userEnteredValue: range }]
+    },
+    strict: true,
+    showCustomUi: true
+  };
+}
+
+function checkboxRule() {
+  return {
+    condition: {
+      type: "BOOLEAN"
     },
     strict: true,
     showCustomUi: true
@@ -74,6 +88,23 @@ function buildValidationRequests(metadata) {
         }
       });
     }
+
+    for (const header of BODY_CHECKBOXES[sheetName] || []) {
+      const columnIndex = headers.indexOf(header);
+      if (columnIndex === -1) continue;
+      requests.push({
+        setDataValidation: {
+          range: {
+            sheetId,
+            startRowIndex: 1,
+            endRowIndex: rowCount,
+            startColumnIndex: columnIndex,
+            endColumnIndex: columnIndex + 1
+          },
+          rule: checkboxRule()
+        }
+      });
+    }
   }
 
   return requests;
@@ -86,7 +117,7 @@ async function applySheetValidations(sheetsClient) {
 }
 
 function migrateRows(sheetName, headers, rows, targetHeaders) {
-  const now = nowIso();
+  const now = sheetDateTime();
   return rows
     .filter((row) => Object.values(row).some((value) => cleanText(value)))
     .map((row) => {
@@ -100,10 +131,15 @@ function migrateRows(sheetName, headers, rows, targetHeaders) {
       }
 
       if (sheetName === SHEETS.leads) {
+        const replySummary = cleanText(row["Reply Summary"]);
+        const existingNotes = cleanText(migrated.Notes);
+        if (targetHeaders.includes("Notes") && replySummary && !existingNotes.includes(replySummary)) {
+          migrated.Notes = existingNotes ? `${existingNotes}\n${row["Reply Summary"]}` : row["Reply Summary"];
+        }
         const key = entityKey(migrated);
         migrated["Entity Key"] = migrated["Entity Key"] || key;
         migrated["Lead ID"] = migrated["Lead ID"] || stableId("lead", key);
-        migrated["Lead Stage"] = migrated["Lead Stage"] || migrated.Stage || "Positive Response";
+        migrated["Lead Stage"] = migrated["Lead Stage"] || migrated.Stage || "Replied Positive";
       }
 
       if (sheetName === SHEETS.deals) {
@@ -111,7 +147,7 @@ function migrateRows(sheetName, headers, rows, targetHeaders) {
         migrated["Entity Key"] = migrated["Entity Key"] || key;
         migrated["Deal ID"] = migrated["Deal ID"] || stableId("deal", key || migrated.Company);
         migrated["Deal Stage"] = migrated["Deal Stage"] || "Call Booked";
-        migrated["Call Status"] = migrated["Call Status"] || (migrated["Call Date"] ? "Scheduled" : "");
+        migrated["Call Status"] = migrated["Call Status"] || (migrated["Call Had Date"] || migrated["Call Date"] ? "Scheduled" : "");
         migrated["Handoff Status"] = migrated["Handoff Status"] || "";
       }
 

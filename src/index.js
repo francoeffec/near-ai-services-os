@@ -20,7 +20,7 @@ async function main() {
   opsService.slackClient = slack.app.client;
 
   attachRoutes({ receiver: slack.receiver, config, opsService, repository, sheetsClient });
-  startScheduler({ config, repository });
+  startScheduler({ config, repository, opsService });
   await slack.app.start(config.port);
   console.log(`NearAI Services running on port ${config.port}`);
 }

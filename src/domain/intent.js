@@ -3,6 +3,7 @@ const { cleanText, splitName } = require("./normalize");
 const STAGE_ALIASES = [
   ["contract signed", "Contract Signed"],
   ["signed", "Contract Signed"],
+  ["future need", "Future Need"],
   ["input call", "Input Call"],
   ["handoff", "Input Call"],
   ["qualified", "Qualified"],
@@ -10,9 +11,9 @@ const STAGE_ALIASES = [
   ["call booked", "Call Booked"],
   ["booked", "Call Booked"],
   ["unqualified", "Unqualified"],
-  ["lost", "Cancelled / Lost"],
-  ["cancelled", "Cancelled / Lost"],
-  ["canceled", "Cancelled / Lost"]
+  ["lost", "Lost"],
+  ["cancelled", "Cancelled"],
+  ["canceled", "Cancelled"]
 ];
 
 function extractCompany(text) {
@@ -125,7 +126,7 @@ function parseIntent(text) {
       email,
       firstName: person.firstName,
       lastName: person.lastName,
-      stage: stage || "Positive Response",
+      stage: stage || "Replied Positive",
       notes: body,
       rawText: body
     };

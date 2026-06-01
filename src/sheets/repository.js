@@ -1,5 +1,5 @@
 const { SHEETS, SCHEMAS } = require("../schema");
-const { cleanText, entityKey, nowIso, stableId } = require("../domain/normalize");
+const { cleanText, entityKey, nowIso, sheetDateTime, stableId } = require("../domain/normalize");
 
 function mergePreservingExisting(existing = {}, incoming = {}) {
   const merged = { ...existing };
@@ -38,7 +38,7 @@ class Repository {
 
   async upsert(sheetName, keyHeader, keyValue, row, idHeader, idPrefix) {
     const table = await this.read(sheetName);
-    const now = nowIso();
+    const now = sheetDateTime();
     const headers = table.headers;
     const existing = table.rows.find((candidate) => String(candidate[keyHeader] || "") === String(keyValue || ""));
     const merged = mergePreservingExisting(existing || {}, row);
@@ -61,6 +61,16 @@ class Repository {
     return { row: merged, created: true };
   }
 
+  async updateRowByNumber(sheetName, rowNumber, row) {
+    const table = await this.read(sheetName);
+    const headers = table.headers;
+    const existing = table.rows.find((candidate) => Number(candidate._rowNumber) === Number(rowNumber)) || {};
+    const merged = mergePreservingExisting(existing, row);
+    if (headers.includes("Updated At")) merged["Updated At"] = sheetDateTime();
+    await this.sheets.updateRow(sheetName, headers, rowNumber, merged);
+    return { row: merged, created: false };
+  }
+
   async addEvent(event) {
     const key = event.eventId || stableId("event", JSON.stringify(event).slice(0, 5000));
     const row = {
@@ -68,8 +78,8 @@ class Repository {
       Source: event.source,
       "Event Type": event.eventType,
       "Entity Key": event.entityKey || "",
-      "Received At": event.receivedAt || nowIso(),
-      "Processed At": event.processedAt || nowIso(),
+      "Received At": event.receivedAt || sheetDateTime(),
+      "Processed At": event.processedAt || sheetDateTime(),
       Status: event.status || "processed",
       Summary: event.summary || "",
       "Raw Payload": JSON.stringify(event.rawPayload || {})
