@@ -124,7 +124,7 @@ function clarificationFieldFromQuestion(text) {
 }
 
 function answerAsInstruction(field, answer) {
-  const value = cleanText(answer);
+  const value = cleanText(answer).replace(/[.\s]+$/g, "");
   if (!field || !value) return "";
   if (field === "company") return `Company is ${value}.`;
   if (field === "contact") return `Contact is ${value}.`;
