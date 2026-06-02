@@ -14,6 +14,7 @@ const { normalizeFathomPayload } = require("../src/integrations/fathom");
 const { loadConfig, validateConfig } = require("../src/config");
 const { shouldRunMetrics } = require("../src/jobs/scheduler");
 const { buildValidationRequests } = require("../src/sheets/bootstrap");
+const { extractCallFields, normalizeCallFields } = require("../src/ai/extract");
 
 test("entityKey uses domain and normalized email", () => {
   assert.equal(entityKey({ companyDomain: "https://www.Apple.com/path", email: " Jane@Apple.com " }), "apple.com|jane@apple.com");
@@ -319,6 +320,86 @@ test("updateDealFromCall creates a deal and lead when a Fathom call has no exist
   assert.equal(upserts[1].sheetName, "Leads");
   assert.equal(upserts[1].row["Lead Stage"], "Call Booked");
   assert.equal(events.at(-1).eventType, "deal_upserted");
+});
+
+test("call extraction turns Clinow-style transcript into sales-ready fields", async () => {
+  const transcript = [
+    "Call title: AI Automation // Clinow + Near",
+    "Company: clinow.com",
+    "Company domain: clinow.com",
+    "Call date: 2026-06-01T20:30:00.000000Z",
+    "Transcript:",
+    "AI Automation // Clinow + Near - June 01",
+    "VIEW RECORDING - 13 mins (No highlights)",
+    "@0:46 - chad",
+    "I got an email talking about AI and a fractional person. I wanted to see what you had to offer and how that works.",
+    "@1:44 - chad",
+    "Do you do all kinds of different employee, from accounting, admin, IT, all of it?",
+    "@4:50 - chad",
+    "So you can do it either way, full-time or part-time?",
+    "@4:55 - chad",
+    "What kind of talent do you have within AI, familiar with workflows and the latest AI tools?",
+    "@5:44 - chad",
+    "If we wanted to create something, we'd map out what we want and go back to Claude or n8n, and figure out how to roll it out through a web app where employees could use it.",
+    "@6:17 - chad",
+    "We are trying to hire some people in Fort Wayne. It's taking longer than I thought. What do we do, how do we get started?",
+    "@6:43 - Camila Bagnati (Near)",
+    "The goal is to have an input call with an engineer to discuss the specific project further. You can commit with as little as 10 hours. The engineer will structure the project and suggest hours.",
+    "@6:58 - chad",
+    "The all-in cost?",
+    "@7:00 - Camila Bagnati (Near)",
+    "It's $70 the hour, all in. Most partners start with 20, 40 hours and scale from there.",
+    "@8:08 - chad",
+    "Do you hire full-time also?",
+    "@9:32 - chad",
+    "How much is it if you hire full-time employees? Just a ballpark range.",
+    "@9:48 - Camila Bagnati (Near)",
+    "Their compensation typically tends to be between $80,000 and $120,000 annual.",
+    "@11:06 - chad",
+    "We're trying to figure out how to use AI in the best way we can.",
+    "@11:22 - Camila Bagnati (Near)",
+    "I can send information on the different models, send profiles for review, and send my calendar link.",
+    "@12:53 - chad",
+    "Let me look at some more information and I'll decide."
+  ].join("\n");
+
+  const fields = await extractCallFields({ ai: { apiKey: "" } }, transcript);
+
+  assert.equal(fields.company, "Clinow");
+  assert.equal(fields.company_domain, "clinow.com");
+  assert.equal(fields.contact_name, "Chad");
+  assert.equal(fields.deal_stage, "Considering");
+  assert.match(fields.Pricing || fields.pricing, /\$70\/hr/);
+  assert.match(fields.pricing, /\$80k-\$120k\/year/);
+  assert.match(fields.key_questions, /What is the all-in hourly cost/);
+  assert.match(fields.key_questions, /full-time AI engineer compensation/);
+  assert.match(fields.next_steps, /Prospect to review/);
+  assert.match(fields.project_scope, /engineer input call/);
+  assert.doesNotMatch(fields.notes, /VIEW RECORDING|@0:|Call title:|Nice to meet you|They would suggest/i);
+  assert.doesNotMatch(fields.notes, /Contract Signed/);
+  assert.ok(fields.notes.length < 1800);
+});
+
+test("normalization rejects transcript-like and unsafe AI fields", () => {
+  const normalized = normalizeCallFields(
+    {
+      deal_stage: "Contract Signed",
+      project_scope: "Call title: AI Automation // Clinow + Near\nTranscript:\n@0:00 - Camila Bagnati (Near)\nNice to meet you.",
+      next_steps: "They would suggest how to build it. They would suggest an amount of hours.",
+      notes: "Transcript dump"
+    },
+    {
+      deal_stage: "Considering",
+      project_scope: "Run an engineer input call to define one priority workflow.",
+      next_steps: "Near to send information. Prospect to review and decide whether to schedule an engineer input call.",
+      pricing: "$70/hr all-in"
+    }
+  );
+
+  assert.equal(normalized.deal_stage, "Considering");
+  assert.match(normalized.project_scope, /engineer input call/);
+  assert.match(normalized.next_steps, /Prospect to review/);
+  assert.doesNotMatch(normalized.notes, /Transcript dump|Nice to meet you|They would suggest/i);
 });
 
 test("Fathom Slack replies recap deal, lead, and filled fields", async () => {
