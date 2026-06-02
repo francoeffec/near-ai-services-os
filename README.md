@@ -62,6 +62,29 @@ The bootstrap is additive and header-driven. It preserves existing rows where po
 
 - `/healthz` confirms the process is alive.
 - `/readyz` confirms the process can read the required Google Sheet tabs and headers.
+- `/readyz` also reports the extraction mode. For production Fathom URL drops, `extraction.robust` should be `true`.
+
+## Fathom Extraction
+
+The Slack workflow works in two modes:
+
+- `transcript_rules_only`: no `OPENAI_API_KEY` and no `FATHOM_API_KEY`. The service can read public Fathom share-page transcripts, but it cannot use Fathom's official summary data or AI extraction. This mode is useful as a fallback only.
+- `fathom_summary_plus_ai`: both `OPENAI_API_KEY` and `FATHOM_API_KEY` are configured. This is the intended production mode for AEs dropping Fathom URLs in `#ai-leads`.
+
+For the no-data-entry AE workflow, configure both keys in the deployed environment:
+
+```text
+OPENAI_API_KEY=...
+FATHOM_API_KEY=...
+```
+
+Fathom direct webhooks should post to:
+
+```text
+https://YOUR_HOST/webhooks/fathom?secret=WEBHOOK_SHARED_SECRET
+```
+
+When Fathom sends summary, transcript, calendar invitees, and recording start time, the service uses that grounded API/webhook data before falling back to raw transcript parsing.
 
 ## Deployment
 
