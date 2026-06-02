@@ -3,6 +3,7 @@ const { extractionStatus } = require("./config");
 const { bootstrapSpreadsheet } = require("./sheets/bootstrap");
 const { normalizeBooking } = require("./integrations/booking");
 const { normalizeFathomPayload, fetchFathomTranscript } = require("./integrations/fathom");
+const { verifyFathomWebhookSignature } = require("./integrations/fathom-webhook");
 const { isPositiveReply, normalizeSmartleadReply } = require("./integrations/smartlead");
 const { syncWeeklyMetrics } = require("./ops/metrics");
 
@@ -13,6 +14,22 @@ function requireSecret(config, req, res) {
     return false;
   }
   return true;
+}
+
+function requireFathomWebhook(config, req, res) {
+  if (config.fathom?.webhookSecret) {
+    const verified = verifyFathomWebhookSignature({
+      secret: config.fathom.webhookSecret,
+      headers: req.headers,
+      rawBody: req.rawBody || JSON.stringify(req.body || {})
+    });
+    if (!verified) {
+      res.status(401).json({ ok: false, error: "unauthorized" });
+      return false;
+    }
+    return true;
+  }
+  return requireSecret(config, req, res);
 }
 
 function requireAdmin(config, req, res) {
@@ -26,7 +43,12 @@ function requireAdmin(config, req, res) {
 
 function attachRoutes({ receiver, config, opsService, repository, sheetsClient }) {
   const app = receiver.app;
-  app.use(express.json({ limit: "5mb" }));
+  app.use(express.json({
+    limit: "5mb",
+    verify: (req, _res, buffer) => {
+      req.rawBody = buffer.toString("utf8");
+    }
+  }));
 
   app.get("/healthz", (_req, res) => {
     res.json({ ok: true, service: "nearai-services" });
@@ -81,7 +103,7 @@ function attachRoutes({ receiver, config, opsService, repository, sheetsClient }
   });
 
   app.post("/webhooks/fathom", async (req, res) => {
-    if (!requireSecret(config, req, res)) return;
+    if (!requireFathomWebhook(config, req, res)) return;
     try {
       const payload = normalizeFathomPayload(req.body);
       const transcriptText = payload.transcriptText || await fetchFathomTranscript(config, payload.recordingId || payload.url);
