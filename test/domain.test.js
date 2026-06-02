@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const test = require("node:test");
 const { entityKey, normalizeDomain, stableId } = require("../src/domain/normalize");
 const { parseIntent } = require("../src/domain/intent");
@@ -15,6 +16,7 @@ const { extractionStatus, loadConfig, validateConfig } = require("../src/config"
 const { shouldRunMetrics } = require("../src/jobs/scheduler");
 const { buildValidationRequests } = require("../src/sheets/bootstrap");
 const { extractCallFields, normalizeCallFields } = require("../src/ai/extract");
+const { verifyFathomWebhookSignature } = require("../src/integrations/fathom-webhook");
 
 test("entityKey uses domain and normalized email", () => {
   assert.equal(entityKey({ companyDomain: "https://www.Apple.com/path", email: " Jane@Apple.com " }), "apple.com|jane@apple.com");
@@ -1026,6 +1028,38 @@ test("Fathom payload uses calendar invitees and recording start time", () => {
   assert.equal(payload.callDate, "2026-06-01T20:30:00.000Z");
   assert.match(payload.summaryText, /fractional AI engineering/);
   assert.equal(payload.transcriptText, "Chad <chad@clinow.com>: What is the all-in hourly cost?");
+});
+
+test("Fathom webhook signature verification accepts valid current signatures", () => {
+  const rawSecret = "test-webhook-secret";
+  const secret = `whsec_${Buffer.from(rawSecret).toString("base64")}`;
+  const rawBody = JSON.stringify({ recording_id: "rec_1" });
+  const timestamp = "1780400000";
+  const id = "msg_1";
+  const signature = crypto.createHmac("sha256", rawSecret).update(`${id}.${timestamp}.${rawBody}`).digest("base64");
+  const now = new Date(Number(timestamp) * 1000 + 1000);
+
+  assert.equal(verifyFathomWebhookSignature({
+    secret,
+    rawBody,
+    now,
+    headers: {
+      "webhook-id": id,
+      "webhook-timestamp": timestamp,
+      "webhook-signature": `v1,${signature}`
+    }
+  }), true);
+
+  assert.equal(verifyFathomWebhookSignature({
+    secret,
+    rawBody: JSON.stringify({ recording_id: "tampered" }),
+    now,
+    headers: {
+      "webhook-id": id,
+      "webhook-timestamp": timestamp,
+      "webhook-signature": `v1,${signature}`
+    }
+  }), false);
 });
 
 test("weekly metrics preview excludes completed campaigns and preserves week history key", async () => {
