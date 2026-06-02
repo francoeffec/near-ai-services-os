@@ -89,6 +89,8 @@ function attachRoutes({ receiver, config, opsService, repository, sheetsClient }
         company: payload.company,
         companyDomain: payload.companyDomain,
         email: payload.email,
+        callDate: payload.callDate,
+        summaryText: payload.summaryText,
         fathomUrl: payload.url,
         transcriptText,
         sourceEventId: payload.sourceEventId,
