@@ -2,7 +2,7 @@ const { SHEETS } = require("../schema");
 const { extractCallFields } = require("../ai/extract");
 const { generateHandoffMessage } = require("../domain/handoff");
 const { fetchFathomRecording } = require("../integrations/fathom");
-const { cleanText, entityKey, firstNonEmpty, nowIso, sheetDateTime, splitName, stableId } = require("../domain/normalize");
+const { cleanText, entityKey, firstNonEmpty, nowIso, sheetDate, sheetDateTime, splitName, stableId } = require("../domain/normalize");
 
 function isLikelyTranscript(text) {
   const value = String(text || "");
@@ -48,6 +48,12 @@ function sameCalendarDate(left, right) {
   return leftDate.toISOString().slice(0, 10) === rightDate.toISOString().slice(0, 10);
 }
 
+function sheetDateValue(...values) {
+  const raw = firstNonEmpty(...values);
+  if (!raw) return "";
+  return sheetDate(raw) || raw;
+}
+
 class OpsService {
   constructor({ repository, slackClient, config }) {
     this.repository = repository;
@@ -90,7 +96,7 @@ class OpsService {
       Campaign: input.campaign || "",
       "Lead Stage": leadStage,
       Owner: owner,
-      "Call Booked On": firstNonEmpty(input.callBookedOn, input["Call Booked On"], input.bookedAt),
+      "Call Booked On": sheetDateValue(input.callBookedOn, input["Call Booked On"], input.bookedAt),
       Notes: firstNonEmpty(input.notes, input.Notes, input.replySummary),
       "Next Step": input.nextStep || ""
     };
@@ -130,8 +136,8 @@ class OpsService {
       Campaign: input.campaign || input.Campaign || base.Campaign || "",
       "Deal Stage": dealStage,
       Owner: owner || base.Owner || "",
-      "Call Had Date": firstNonEmpty(input.callDate, input["Call Had Date"], input["Call Date"], base["Call Had Date"], base["Call Date"]),
-      "Call Booked On": firstNonEmpty(input.callBookedOn, input["Call Booked On"], input.bookedAt, base["Call Booked On"]),
+      "Call Had Date": sheetDateValue(input.callDate, input["Call Had Date"], input["Call Date"], base["Call Had Date"], base["Call Date"]),
+      "Call Booked On": sheetDateValue(input.callBookedOn, input["Call Booked On"], input.bookedAt, base["Call Booked On"]),
       "Call Status": input.callStatus || base["Call Status"] || "",
       "Fathom URL": input.fathomUrl || input["Fathom URL"] || base["Fathom URL"] || "",
       Pricing: input.pricing || input.Pricing || base.Pricing || "",
@@ -139,8 +145,8 @@ class OpsService {
       "Engineer Type": input.engineerType || input["Engineer Type"] || base["Engineer Type"] || "",
       "Skills Needed": input.skillsNeeded || input["Skills Needed"] || base["Skills Needed"] || "",
       "Project Scope": input.projectScope || input["Project Scope"] || base["Project Scope"] || "",
-      "Start Date": input.startDate || input["Start Date"] || base["Start Date"] || "",
-      "Close Date": input.closeDate || input["Close Date"] || base["Close Date"] || "",
+      "Start Date": sheetDateValue(input.startDate, input["Start Date"], base["Start Date"]),
+      "Close Date": sheetDateValue(input.closeDate, input["Close Date"], base["Close Date"]),
       "If Lost Reason": input.ifLostReason || input["If Lost Reason"] || base["If Lost Reason"] || "",
       "Next Steps": input.nextSteps || input["Next Steps"] || base["Next Steps"] || "",
       Notes: input.notes || input.Notes || base.Notes || "",
