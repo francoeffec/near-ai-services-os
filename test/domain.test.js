@@ -1159,6 +1159,27 @@ test("environment validator accepts Apps Script sheet proxy", () => {
   assert.equal(result.ok, true);
 });
 
+test("environment validator can require robust Fathom extraction", () => {
+  const config = loadConfig({ strict: false });
+  const result = validateConfig({
+    ...config,
+    google: {
+      spreadsheetId: "sheet",
+      serviceAccountJson: "",
+      scriptWebAppUrl: "https://script.google.com/macros/s/example/exec",
+      scriptSharedSecret: "secret"
+    },
+    slack: { ...config.slack, botToken: "xoxb-token", signingSecret: "signing", aiLeadsChannelId: "C1" },
+    ai: { ...config.ai, apiKey: "openai" },
+    fathom: { ...config.fathom, apiKey: "" },
+    webhookSharedSecret: "webhook",
+    adminToken: "admin"
+  }, { requireRobustExtraction: true });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.missing, ["FATHOM_API_KEY"]);
+});
+
 test("extraction status reports degraded and robust modes without exposing secrets", () => {
   const degraded = extractionStatus({
     ai: { apiKey: "" },
