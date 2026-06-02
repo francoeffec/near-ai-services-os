@@ -223,6 +223,42 @@ test("repository inserts new rows into first empty sheet row", async () => {
   assert.equal(updates[0].rowNumber, 4);
 });
 
+test("repository normalizes existing created-at timestamps on update", async () => {
+  const updates = [];
+  const repository = new Repository({
+    async readTable() {
+      return {
+        headers: ["ID", "Entity Key", "Company", "Created At", "Updated At"],
+        rows: [
+          {
+            _rowNumber: 2,
+            ID: "id_1",
+            "Entity Key": "pisteyo.com|eduardosuarez@pisteyo.com",
+            Company: "Pisteyo",
+            "Created At": "2026-06-02T07:00:00.000Z"
+          }
+        ]
+      };
+    },
+    async updateRow(sheetName, headers, rowNumber, row) {
+      updates.push({ sheetName, headers, rowNumber, row });
+    }
+  });
+
+  const result = await repository.upsert(
+    "Custom",
+    "Entity Key",
+    "pisteyo.com|eduardosuarez@pisteyo.com",
+    { Company: "Pisteyo" },
+    "ID",
+    "id"
+  );
+
+  assert.equal(result.created, false);
+  assert.equal(result.row["Created At"], "Jun 2, 2026");
+  assert.equal(updates[0].rowNumber, 2);
+});
+
 test("firstEmptyRowNumber falls back to next row when no blanks exist", () => {
   assert.equal(firstEmptyRowNumber({
     rows: [
