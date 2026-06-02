@@ -18,6 +18,7 @@ async function extractCallFieldsWithOpenAI(config, transcriptText) {
       engineer_type: { type: "string" },
       need: { type: "string" },
       pain_points: { type: "string" },
+      key_questions: { type: "string" },
       skills_needed: { type: "string" },
       project_scope: { type: "string" },
       start_date: { type: "string" },
@@ -36,6 +37,7 @@ async function extractCallFieldsWithOpenAI(config, transcriptText) {
       "engineer_type",
       "need",
       "pain_points",
+      "key_questions",
       "skills_needed",
       "project_scope",
       "start_date",
@@ -69,8 +71,9 @@ async function extractCallFieldsWithOpenAI(config, transcriptText) {
             "The company and contact should be the external prospect, not Near.",
             "Prefer a Fathom summary/action-items section when present; use the transcript only to fill gaps.",
             "Use deal_stage only from: Cancelled, Call Booked, Unqualified, Considering, Input Call, Contract Signed, Lost, Future Need.",
-            "Keep need, pain_points, project_scope, skills_needed, pricing, next_steps, and notes concise. Do not paste transcript lines.",
-            "notes must be a human-readable TL;DR under 1200 characters with only these sections: Need, Pain points, Pricing, Scope of project, Skills needed. Use short bullets.",
+            "Capture key_questions as the most important prospect questions asked during the call, rewritten concisely.",
+            "Keep need, pain_points, key_questions, project_scope, skills_needed, pricing, next_steps, and notes concise. Do not paste transcript lines.",
+            "notes must be a human-readable TL;DR under 1400 characters with only these sections: Need, Pain points, Key questions asked, Pricing, Scope of project, Skills needed, Next steps. Use short bullets.",
             "Use empty strings when the call does not support a field. Do not invent facts."
           ].join(" ")
         },
@@ -167,6 +170,7 @@ function normalizeCallFields(fields = {}) {
     ...fields,
     need: compactField(fields.need || fields.project_scope, 2, 420),
     pain_points: compactField(fields.pain_points, 2, 420),
+    key_questions: compactField(fields.key_questions, 3, 520),
     pricing: compactField(fields.pricing, 1, 220),
     skills_needed: compactField(fields.skills_needed, 3, 420),
     project_scope: compactField(fields.project_scope, 2, 520),
@@ -195,6 +199,13 @@ function heuristicCallExtraction(text) {
   const hours = (body.match(/\b[0-9]{1,3}\s*(?:hours|hrs|h)\/?(?:week|wk)?\b/i) || [])[0] || "";
   const startDate = (body.match(/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}(?:,\s+\d{4})?\b/i) || [])[0] || "";
   const skills = collectSkills(body);
+  const keyQuestions = String(raw || "")
+    .split(/\n+/)
+    .map((line) => cleanText(line.replace(/^[^:\n]{1,40}:\s*/, "")))
+    .filter((line) => /\?/.test(line))
+    .filter((line) => !/^(hello|yes|no|okay|right)\??$/i.test(line))
+    .slice(0, 3)
+    .join(" ");
 
   return {
     company: extractCompanyName(raw),
@@ -207,6 +218,7 @@ function heuristicCallExtraction(text) {
     engineer_type: skills ? "AI Automation Engineer" : "",
     need: matchingLines(raw, /\b(need|looking for|want|interested|support|help)\b/i, 2),
     pain_points: matchingLines(raw, /\b(pain|manual|problem|issue|challenge|bottleneck|hard|difficult|slow)\b/i, 2),
+    key_questions: keyQuestions,
     skills_needed: skills,
     project_scope: matchingLines(raw, /\b(automate|automation|workflow|build|integrat|report|dashboard|agent|api|n8n|airtable|supabase|mcp)\b/i, 3),
     start_date: startDate,
