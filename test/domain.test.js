@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const test = require("node:test");
-const { entityKey, normalizeDomain, stableId } = require("../src/domain/normalize");
+const { entityKey, normalizeDomain, sheetDate, stableId } = require("../src/domain/normalize");
 const { parseIntent } = require("../src/domain/intent");
 const { generateHandoffMessage } = require("../src/domain/handoff");
 const { diagnose, syncWeeklyMetrics, weekStart } = require("../src/ops/metrics");
@@ -22,6 +22,8 @@ test("entityKey uses domain and normalized email", () => {
   assert.equal(entityKey({ companyDomain: "https://www.Apple.com/path", email: " Jane@Apple.com " }), "apple.com|jane@apple.com");
   assert.equal(normalizeDomain("https://www.Near.com/foo"), "near.com");
   assert.match(stableId("deal", "apple.com|jane@apple.com"), /^deal_[a-f0-9]{12}$/);
+  assert.equal(sheetDate("May 27, 2026"), "May 27, 2026");
+  assert.equal(sheetDate("2026-05-27"), "May 27, 2026");
 });
 
 test("parseIntent detects lead creation", () => {
@@ -59,7 +61,8 @@ test("parseIntent maps manual lead and deal commands into the right fields", () 
     "He's interested in an AI engineer at some point first.",
     "The call was had on May 27.",
     "The next step is for Franco to follow up on June 15.",
-    "Account executive owner is Franco."
+    "Account executive owner is Franco.",
+    "*Sent using* ChatGPT"
   ].join(" "));
 
   assert.equal(intent.type, "create_deal");
@@ -73,6 +76,7 @@ test("parseIntent maps manual lead and deal commands into the right fields", () 
   assert.equal(intent.stage, "Future Need");
   assert.equal(intent.callDate, "May 27, 2026");
   assert.match(intent.nextSteps, /Franco to follow up on June 15/);
+  assert.doesNotMatch(intent.notes, /Sent using/i);
 });
 
 test("manual lead and deal commands ask for missing next step before writing", async () => {
