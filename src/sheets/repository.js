@@ -1,5 +1,5 @@
 const { SHEETS, SCHEMAS } = require("../schema");
-const { cleanText, entityKey, nowIso, sheetDateTime, stableId } = require("../domain/normalize");
+const { cleanText, entityKey, sheetDate, sheetDateTime, stableId } = require("../domain/normalize");
 
 function mergePreservingExisting(existing = {}, incoming = {}) {
   const merged = { ...existing };
@@ -27,6 +27,13 @@ function firstEmptyRowNumber(table = {}, headers = []) {
   const rows = table.rows || [];
   const emptyRow = rows.find((row) => !rowHasData(row, headers));
   return emptyRow ? emptyRow._rowNumber : rows.length + 2;
+}
+
+function normalizeDateField(row, field) {
+  const raw = cleanText(row[field]);
+  if (!raw) return;
+  const formatted = sheetDate(raw);
+  if (formatted) row[field] = formatted;
 }
 
 class Repository {
@@ -61,6 +68,9 @@ class Repository {
     if (headers.includes("Created At") && !merged["Created At"]) {
       merged["Created At"] = now;
     }
+    if (headers.includes("Created At")) {
+      normalizeDateField(merged, "Created At");
+    }
 
     if (existing) {
       await this.sheets.updateRow(sheetName, headers, existing._rowNumber, merged);
@@ -78,6 +88,7 @@ class Repository {
     const existing = table.rows.find((candidate) => Number(candidate._rowNumber) === Number(rowNumber)) || {};
     const merged = mergePreservingExisting(existing, row);
     if (headers.includes("Updated At")) merged["Updated At"] = sheetDateTime();
+    if (headers.includes("Created At")) normalizeDateField(merged, "Created At");
     await this.sheets.updateRow(sheetName, headers, rowNumber, merged);
     return { row: merged, created: false };
   }
