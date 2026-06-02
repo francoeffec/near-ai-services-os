@@ -88,6 +88,7 @@ function attachRoutes({ receiver, config, opsService, repository, sheetsClient }
       const result = await opsService.updateDealFromCall({
         company: payload.company,
         companyDomain: payload.companyDomain,
+        contactName: payload.contactName,
         email: payload.email,
         callDate: payload.callDate,
         summaryText: payload.summaryText,
