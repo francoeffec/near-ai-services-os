@@ -56,7 +56,8 @@ function loadConfig({ strict = true } = {}) {
     },
     fathom: {
       apiKey: process.env.FATHOM_API_KEY || "",
-      baseUrl: process.env.FATHOM_BASE_URL || "https://api.fathom.ai/external/v1"
+      baseUrl: process.env.FATHOM_BASE_URL || "https://api.fathom.ai/external/v1",
+      webhookSecret: process.env.FATHOM_WEBHOOK_SECRET || ""
     },
     booking: {
       calendarIds: optionalList("GOOGLE_CALENDAR_IDS"),
