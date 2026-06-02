@@ -198,13 +198,19 @@ class OpsService {
 
   async updateDealFromCall(input) {
     const suppliedTranscript = input.transcriptText || "";
+    const suppliedSummary = firstNonEmpty(input.summaryText, input.summary, input.defaultSummary, input.default_summary);
     if (!cleanText(suppliedTranscript) && !input.fathomUrl) {
       throw new Error("I need transcript text or a Fathom URL to update the deal.");
     }
 
-    let recording = {};
+    let recording = suppliedSummary ? { summaryText: suppliedSummary } : {};
     if (input.fathomUrl && !isLikelyTranscript(suppliedTranscript)) {
-      recording = await fetchFathomRecording(this.config, input.fathomUrl);
+      const fetchedRecording = await fetchFathomRecording(this.config, input.fathomUrl);
+      recording = {
+        ...recording,
+        ...fetchedRecording,
+        summaryText: firstNonEmpty(fetchedRecording.summaryText, recording.summaryText)
+      };
     }
 
     const transcriptText = cleanText(recording.transcriptText) ? recording.transcriptText : suppliedTranscript;
