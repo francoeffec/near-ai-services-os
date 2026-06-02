@@ -664,6 +664,25 @@ test("normalization rejects transcript-like and unsafe AI fields", () => {
   assert.doesNotMatch(normalized.notes, /Transcript dump|Nice to meet you|They would suggest/i);
 });
 
+test("normalization rejects vague AI next steps in favor of concrete fallback actions", () => {
+  const normalized = normalizeCallFields(
+    {
+      deal_stage: "Considering",
+      next_steps: "Continue the conversation and touch base.",
+      need: "Exploring fractional AI engineering support."
+    },
+    {
+      deal_stage: "Considering",
+      next_steps: "Near to send information on fractional and full-time options. Prospect to review and decide whether to schedule an engineer input call.",
+      need: "Exploring fractional AI engineering support and how the model works."
+    }
+  );
+
+  assert.match(normalized.next_steps, /Near to send information/);
+  assert.match(normalized.next_steps, /Prospect to review/);
+  assert.doesNotMatch(normalized.next_steps, /touch base|Continue the conversation/i);
+});
+
 test("Fathom Slack replies use extracted summary over row fallbacks", async () => {
   const text = await handleIntent({
     intent: { type: "update_deal_from_call", fathomUrl: "https://fathom.video/share/clinow" },
