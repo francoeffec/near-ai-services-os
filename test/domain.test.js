@@ -8,7 +8,7 @@ const { diagnose, syncWeeklyMetrics, weekStart } = require("../src/ops/metrics")
 const { OpsService } = require("../src/ops/service");
 const { fetchFathomRecording, htmlTranscriptToText, parseFathomSharePage, transcriptToText } = require("../src/integrations/fathom");
 const { Repository, firstEmptyRowNumber, mergePreservingExisting } = require("../src/sheets/repository");
-const { handleIntent, inferCompanyFromThread } = require("../src/slack/app");
+const { buildClarifiedIntent, clarificationQuestion, handleIntent, inferCompanyFromThread, isLeadingUserMention } = require("../src/slack/app");
 const { isPositiveReply, normalizeSmartleadReply } = require("../src/integrations/smartlead");
 const { normalizeBooking } = require("../src/integrations/booking");
 const { normalizeFathomPayload } = require("../src/integrations/fathom");
@@ -47,6 +47,74 @@ test("parseIntent treats raw Fathom links as call updates that can create deals"
   assert.equal(intent.type, "update_deal_from_call");
   assert.equal(intent.fathomUrl, "https://fathom.video/share/MnszU5JTucMRvozGWkBUgfD7b3C7jCRm");
   assert.equal(intent.autoCreateDeal, true);
+});
+
+test("parseIntent maps manual lead and deal commands into the right fields", () => {
+  const intent = parseIntent([
+    "<@U0B6XJ2SWUB|Near AI OS> - add lead and deal to the tracker.",
+    "existing customer.",
+    "david hachuel.",
+    "<mailto:david@kiwibiosciences.com|david@kiwibiosciences.com>.",
+    "company is kiwi biosciences.",
+    "He's interested in an AI engineer at some point first.",
+    "The call was had on May 27.",
+    "The next step is for Franco to follow up on June 15.",
+    "Account executive owner is Franco."
+  ].join(" "));
+
+  assert.equal(intent.type, "create_deal");
+  assert.equal(intent.company, "Kiwi Biosciences");
+  assert.equal(intent.companyDomain, "kiwibiosciences.com");
+  assert.equal(intent.firstName, "David");
+  assert.equal(intent.lastName, "Hachuel");
+  assert.equal(intent.email, "david@kiwibiosciences.com");
+  assert.equal(intent.source, "Customer");
+  assert.equal(intent.owner, "Franco");
+  assert.equal(intent.stage, "Future Need");
+  assert.equal(intent.callDate, "May 27, 2026");
+  assert.match(intent.nextSteps, /Franco to follow up on June 15/);
+});
+
+test("manual lead and deal commands ask for missing next step before writing", async () => {
+  let wrote = false;
+  const intent = parseIntent("Add lead and deal to the tracker. Customer. Jane Doe. jane@example.com. Company is Example.");
+
+  const text = await handleIntent({
+    intent,
+    opsService: {
+      async createDeal() {
+        wrote = true;
+      }
+    }
+  });
+
+  assert.equal(wrote, false);
+  assert.equal(clarificationQuestion(intent), "What's the next step?");
+  assert.match(text, /What's the next step\?/);
+});
+
+test("clarification replies complete the original thread intent", () => {
+  const intent = buildClarifiedIntent(
+    [
+      {
+        text: "Add lead and deal to the tracker. Customer. Jane Doe. jane@example.com. Company is Example."
+      },
+      {
+        text: "Before I update the tracker, I need one thing: What's the next step?"
+      }
+    ],
+    "Franco should follow up next Friday."
+  );
+
+  assert.equal(intent.type, "create_deal");
+  assert.equal(intent.company, "Example");
+  assert.equal(intent.email, "jane@example.com");
+  assert.equal(intent.nextSteps, "Franco should follow up next Friday");
+});
+
+test("broad Slack message handler can skip direct bot mentions", () => {
+  assert.equal(isLeadingUserMention("<@U0B6XJ2SWUB|Near AI OS> add a deal"), true);
+  assert.equal(isLeadingUserMention("Drop this Fathom URL <https://fathom.video/share/abc>"), false);
 });
 
 test("handoff message includes recruiting fields", () => {
@@ -107,6 +175,61 @@ test("createDeal updates existing company row when command lacks email", async (
   assert.equal(result.row.Owner, "Kevin Dubon");
   assert.equal(upserts[0].keyValue, "venveo.com|zach@venveo.com");
   assert.equal(upserts[1].row.Email, "zach@venveo.com");
+});
+
+test("manual Slack deal intent writes parsed fields to deal and lead rows", async () => {
+  const upserts = [];
+  const repository = {
+    async read(sheetName) {
+      if (sheetName === "Config") {
+        return {
+          headers: [],
+          rows: [
+            { Type: "owner_alias", Key: "FP", Value: "Franco Pereyra", "Slack User ID": "U1" }
+          ]
+        };
+      }
+      return { headers: [], rows: [] };
+    },
+    async findDealByCompany() {
+      return null;
+    },
+    async findDealByKey() {
+      return null;
+    },
+    async upsert(sheetName, keyHeader, keyValue, row) {
+      upserts.push({ sheetName, keyHeader, keyValue, row });
+      return { row, created: true };
+    },
+    async addEvent() {}
+  };
+  const service = new OpsService({ repository, slackClient: null, config: { slack: {} } });
+  const intent = parseIntent([
+    "add lead and deal to the tracker.",
+    "existing customer.",
+    "david hachuel.",
+    "david@kiwibiosciences.com.",
+    "company is kiwi biosciences.",
+    "He's interested in an AI engineer at some point first.",
+    "The call was had on May 27.",
+    "The next step is for Franco to follow up on June 15.",
+    "Account executive owner is Franco."
+  ].join(" "));
+
+  await service.createDeal(intent);
+
+  assert.equal(upserts[0].sheetName, "Deals");
+  assert.equal(upserts[0].row.Company, "Kiwi Biosciences");
+  assert.equal(upserts[0].row["Company Domain"], "kiwibiosciences.com");
+  assert.equal(upserts[0].row["First Name"], "David");
+  assert.equal(upserts[0].row["Last Name"], "Hachuel");
+  assert.equal(upserts[0].row.Source, "Customer");
+  assert.equal(upserts[0].row.Owner, "Franco Pereyra");
+  assert.equal(upserts[0].row["Deal Stage"], "Future Need");
+  assert.equal(upserts[0].row["Call Had Date"], "May 27, 2026");
+  assert.match(upserts[0].row["Next Steps"], /Franco to follow up on June 15/);
+  assert.equal(upserts[1].sheetName, "Leads");
+  assert.match(upserts[1].row["Next Step"], /Franco to follow up on June 15/);
 });
 
 test("fathom transcript arrays become speaker text", () => {
