@@ -98,7 +98,7 @@ function fathomUpdateText(result) {
   return [
     `Fathom update for ${company}: ${dealAction} the deal and ${leadAction} the lead.${fieldText}`,
     "",
-    formatSlackCallSummary(result.row)
+    formatSlackCallSummary(result.callSummary || result.row)
   ].join("\n");
 }
 
