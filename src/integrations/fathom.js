@@ -1,4 +1,4 @@
-const { cleanText, firstNonEmpty } = require("../domain/normalize");
+const { cleanText, domainFromEmail, firstNonEmpty } = require("../domain/normalize");
 
 function transcriptToText(value) {
   if (!Array.isArray(value)) return value || "";
@@ -6,7 +6,9 @@ function transcriptToText(value) {
     .map((entry) => {
       if (typeof entry === "string") return entry;
       const speaker = entry.speaker?.display_name || entry.speaker || "Speaker";
-      return `${speaker}: ${entry.text || entry.content || ""}`;
+      const email = firstNonEmpty(entry.speaker?.matched_calendar_invitee_email, entry.speaker?.email, entry.email);
+      const speakerLabel = email ? `${speaker} <${email}>` : speaker;
+      return `${speakerLabel}: ${entry.text || entry.content || ""}`;
     })
     .join("\n");
 }
@@ -50,6 +52,22 @@ function normalizeCompany(value) {
 function normalizeCompanyDomain(value) {
   if (!value || typeof value !== "object") return "";
   return firstNonEmpty(value.domain, value.company_domain);
+}
+
+function calendarInvitees(payload = {}, recording = {}) {
+  const invitees = payload.calendar_invitees || recording.calendar_invitees || payload.invitees || recording.invitees;
+  return Array.isArray(invitees) ? invitees : [];
+}
+
+function isNearEmail(email) {
+  return /@(?:hirewithnear|near)\.com$/i.test(cleanText(email));
+}
+
+function externalInvitee(payload = {}, recording = {}) {
+  return calendarInvitees(payload, recording).find((invitee) => {
+    const email = firstNonEmpty(invitee.email, invitee.email_address);
+    return email && !isNearEmail(email);
+  }) || {};
 }
 
 function extractSummaryText(...values) {
@@ -122,15 +140,27 @@ function parseFathomSharePage(html, sourceUrl = "") {
 
 function normalizeFathomPayload(payload) {
   const recording = payload.recording || payload.call || payload.meeting || payload;
+  const invitee = externalInvitee(payload, recording);
+  const inviteeEmail = firstNonEmpty(invitee.email, invitee.email_address);
   return {
-    sourceEventId: firstNonEmpty(payload.event_id, payload.id, recording.id),
+    sourceEventId: firstNonEmpty(payload.event_id, payload.id, recording.id, payload.recording_id),
     recordingId: firstNonEmpty(recording.id, payload.recording_id),
     url: firstNonEmpty(recording.url, recording.share_url, payload.url, payload.fathom_url),
     title: firstNonEmpty(recording.title, payload.title),
-    company: firstNonEmpty(normalizeCompany(payload.company), normalizeCompany(recording.company)),
-    companyDomain: firstNonEmpty(payload.company_domain, payload.companyDomain, normalizeCompanyDomain(payload.company), normalizeCompanyDomain(recording.company)),
-    email: firstNonEmpty(payload.email, recording.email),
-    callDate: firstNonEmpty(payload.call_date, payload.callDate, recording.call_date, recording.started_at, recording.recording?.started_at),
+    company: firstNonEmpty(normalizeCompany(payload.company), normalizeCompany(recording.company), invitee.company),
+    companyDomain: firstNonEmpty(payload.company_domain, payload.companyDomain, normalizeCompanyDomain(payload.company), normalizeCompanyDomain(recording.company), domainFromEmail(inviteeEmail)),
+    contactName: firstNonEmpty(payload.contact_name, payload.contactName, invitee.name, invitee.display_name),
+    email: firstNonEmpty(payload.email, recording.email, inviteeEmail),
+    callDate: firstNonEmpty(
+      payload.call_date,
+      payload.callDate,
+      payload.recording_start_time,
+      payload.started_at,
+      recording.call_date,
+      recording.recording_start_time,
+      recording.started_at,
+      recording.recording?.started_at
+    ),
     summaryText: extractSummaryText(
       payload.summary,
       payload.default_summary,
