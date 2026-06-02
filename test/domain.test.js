@@ -294,6 +294,14 @@ test("Fathom share fetch uses API summary when an API key is configured", async 
         })
       };
     }
+    if (String(url).includes("/transcript")) {
+      return {
+        ok: true,
+        json: async () => ({
+          transcript: [{ speaker: { display_name: "Client" }, text: "Need Zapier and APIs." }]
+        })
+      };
+    }
     if (String(url).includes("/copy_transcript")) {
       return {
         ok: true,
@@ -311,6 +319,8 @@ test("Fathom share fetch uses API summary when an API key is configured", async 
     assert.match(recording.summaryText, /Need Zapier support/);
     assert.match(recording.transcriptText, /Need Zapier and APIs/);
     assert.ok(calls.some((url) => url.includes("/recordings/692333461/summary")));
+    assert.ok(calls.some((url) => url.includes("/recordings/692333461/transcript")));
+    assert.equal(calls.some((url) => url.includes("/copy_transcript")), false);
   } finally {
     global.fetch = originalFetch;
   }
@@ -757,6 +767,32 @@ test("call extraction handles Spanish agency-style AI services calls", async () 
   assert.match(fields.next_steps, /WhatsApp or calendar/);
   assert.doesNotMatch(fields.notes, /@\d{1,2}:\d{2}|Transcript:|VIEW RECORDING|Franco Pereyra|Camila Bagnati/);
   assert.ok(fields.notes.length < 1800);
+});
+
+test("call extraction does not leak Pisteyo into other company summaries", async () => {
+  const transcript = [
+    "Call title: AI Automation // BCE South + Near",
+    "Company: BCE South",
+    "Company domain: bcesouth.com",
+    "@0:00 - Bob Selvi",
+    "We do discovery and roadmap work and want help estimating and scoping AI projects.",
+    "@1:00 - Bob Selvi",
+    "Do you support roles beyond AI, such as accounting, admin, IT, and operations?",
+    "@2:00 - Bob Selvi",
+    "Is that achievable? Is everybody doing what they're supposed to do?",
+    "@3:00 - Camila Bagnati (Near)",
+    "The next step is usually an engineer input call to define the workflow and estimate hours.",
+    "@4:00 - Camila Bagnati (Near)",
+    "It's $70 per hour all-in for fractional AI engineering."
+  ].join("\n");
+
+  const fields = await extractCallFields({ ai: { apiKey: "" } }, transcript);
+
+  assert.equal(fields.company, "BCE South");
+  assert.match(fields.project_scope, /Support BCE South across discovery/);
+  assert.doesNotMatch(fields.project_scope, /Pisteyo/);
+  assert.doesNotMatch(fields.notes, /Pisteyo/);
+  assert.match(fields.key_questions, /roles beyond AI/);
 });
 
 test("normalization rejects transcript-like and unsafe AI fields", () => {
