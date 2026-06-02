@@ -17,6 +17,7 @@ const STAGE_ALIASES = [
 
 function extractCompany(text) {
   const patterns = [
+    /\bat\s+([A-Z][A-Za-z0-9&.\-' ]{1,60}?)\s*,?\s+as\s+(?:a\s+)?(?:lead|deal)\b/i,
     /\bcompany\s+(?:is|:)\s+([A-Z][A-Za-z0-9&.\-' ]{1,60}?)(?:\.|,|$)/i,
     /\b(?:company|account)\s+name\s+(?:is|:)\s+([A-Z][A-Za-z0-9&.\-' ]{1,60}?)(?:\.|,|$)/i,
     /\bassign\s+.+?\s+to\s+([A-Z][A-Za-z0-9&.\-' ]{1,60})(?:\.|,|$)/i,
@@ -74,12 +75,15 @@ function extractFathomUrl(text) {
 }
 
 function extractPerson(text) {
+  const explicitContact = text.match(/\b(?:main\s+contact|contact)\s+(?:is|:)?\s+([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){1,3})\b/i);
+  if (explicitContact) return splitName(titleIfLowercase(explicitContact[1]));
+
   const email = extractEmail(text);
   const beforeEmail = email ? text.slice(0, text.indexOf(email)) : text;
   const sentenceParts = beforeEmail.split(/[.,\n]/).map(cleanText).filter(Boolean);
   for (const part of sentenceParts.slice().reverse()) {
     const words = part.split(" ").filter(Boolean);
-    if (words.length >= 2 && words.length <= 4 && !/add|create|lead|deal|company|interested|customer|source|tracker|mailto/i.test(part)) {
+    if (words.length >= 2 && words.length <= 4 && !/^at\s+/i.test(part) && !/add|create|lead|deal|company|contact|interested|customer|source|tracker|mailto/i.test(part)) {
       const person = splitName(titleIfLowercase(part));
       return person;
     }
@@ -112,14 +116,60 @@ function dateWithYear(value) {
   return `${text}, ${new Date().getFullYear()}`;
 }
 
+function formatDate(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  });
+}
+
+const WEEKDAY_INDEX = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6
+};
+
+function relativeWeekdayDate(value, referenceDate = new Date()) {
+  const text = cleanText(value).toLowerCase();
+  const weekdayMatch = text.match(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/);
+  if (!weekdayMatch) return "";
+  const targetDay = WEEKDAY_INDEX[weekdayMatch[1]];
+  const reference = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate());
+  if (/last\s+week/i.test(text)) {
+    const startOfCurrentWeek = new Date(reference);
+    startOfCurrentWeek.setDate(reference.getDate() - reference.getDay());
+    startOfCurrentWeek.setDate(startOfCurrentWeek.getDate() - 7 + targetDay);
+    return formatDate(startOfCurrentWeek);
+  }
+  const offset = (targetDay - reference.getDay() + 7) % 7;
+  const date = new Date(reference);
+  date.setDate(reference.getDate() + offset);
+  return formatDate(date);
+}
+
 function extractCallDate(text) {
+  const relativeMatch = text.match(/\b(?:call\s+(?:was\s+)?had|call date|met|meeting(?:\s+happened)?)\s+(?:on|is|:)?\s+((?:last\s+week\s+)?(?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)(?:\s+last\s+week)?)/i);
+  if (relativeMatch) return relativeWeekdayDate(relativeMatch[1]);
+
   const match = text.match(/\b(?:call\s+(?:was\s+)?had|call date|met|meeting(?:\s+happened)?)\s+(?:on|is|:)?\s+([A-Z][a-z]+\.?\s+\d{1,2}(?:,?\s+\d{4})?)/i);
   return match ? dateWithYear(match[1]) : "";
 }
 
 function extractNextSteps(text) {
   const match = text.match(/\bnext steps?\s+(?:is|are|:)\s+(.+?)(?=(?:\.\s+(?:account executive\s+|ae\s+)?owner\b|\.\s+(?:source|campaign)\b|$))/i);
-  if (!match) return "";
+  if (!match) {
+    const promisedAction = text.match(/\b([A-Z][A-Za-z.'-]+)\s+said\s+(?:that\s+)?(?:he|she|they)\s+would\s+(.+?)(?=\.|$)/i);
+    if (promisedAction) {
+      return cleanText(`${titleIfLowercase(promisedAction[1])} will ${promisedAction[2]}`).replace(/[.\s]+$/g, "");
+    }
+    return "";
+  }
   return cleanText(match[1])
     .replace(/\s+\./g, ".")
     .replace(/^for\s+/i, "")
@@ -160,7 +210,7 @@ function parseIntent(text) {
     };
   }
 
-  if (/\b(create|add)\b.*\bdeal\b|\bcall booked\b/i.test(body)) {
+  if (/\b(create|add)\b.*\bdeal\b|\bas\s+(?:a\s+)?deal\b|\bdeal\b.*\bstage\b|\bcall booked\b/i.test(body)) {
     return {
       type: "create_deal",
       company,
