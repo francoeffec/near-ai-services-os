@@ -414,9 +414,20 @@ function hasTranscriptLeak(value) {
     || text.length > 900;
 }
 
+function isWeakValue(value) {
+  return /^(?:not captured|not discussed|not mentioned|unknown|none|n\/a|na|tbd|no notes?)\.?$/i.test(cleanText(value));
+}
+
+function isScopeLikeNeed(value) {
+  const text = cleanText(value);
+  return /\b(engineer input call|estimate hours|potential builds|workflow automation|project scope|rollout path)\b/i.test(text)
+    && !/\b(explor|consider|trying|need|want|looking|evaluate|interested)\b/i.test(text);
+}
+
 function safeField(value, { allowLong = false, nextStep = false } = {}) {
   const text = cleanText(value);
   if (!text) return "";
+  if (isWeakValue(text)) return "";
   if (hasTranscriptLeak(text)) return "";
   if (!allowLong && text.length > 700) return "";
   if (nextStep && /\b(they would suggest|if you agree|if you're ready|work product)\b/i.test(text)) return "";
@@ -424,7 +435,10 @@ function safeField(value, { allowLong = false, nextStep = false } = {}) {
 }
 
 function chooseField(primary, fallback, options) {
-  return firstNonEmpty(safeField(primary, options), safeField(fallback, options));
+  const safePrimary = safeField(primary, options);
+  const safeFallback = safeField(fallback, options);
+  if (options?.need && safeFallback && isScopeLikeNeed(safePrimary)) return safeFallback;
+  return firstNonEmpty(safePrimary, safeFallback);
 }
 
 function chooseDealStage(primary, fallback) {
@@ -478,7 +492,7 @@ function normalizeCallFields(fields = {}, fallbackFields = {}) {
     contact_name: chooseField(fields.contact_name, fallbackFields.contact_name),
     contact_email: chooseField(fields.contact_email, fallbackFields.contact_email),
     deal_stage: chooseDealStage(fields.deal_stage, fallbackFields.deal_stage),
-    need: compactField(chooseField(fields.need || fields.project_scope, fallbackFields.need || fallbackFields.project_scope), 3, 520),
+    need: compactField(chooseField(fields.need || fields.project_scope, fallbackFields.need || fallbackFields.project_scope, { need: true }), 3, 520),
     pain_points: compactField(chooseField(fields.pain_points, fallbackFields.pain_points), 3, 520),
     key_questions: compactField(chooseField(fields.key_questions, fallbackFields.key_questions), 5, 700),
     pricing: compactField(chooseField(fields.pricing, fallbackFields.pricing), 4, 520),
@@ -486,7 +500,7 @@ function normalizeCallFields(fields = {}, fallbackFields = {}) {
     engineer_type: chooseField(fields.engineer_type, fallbackFields.engineer_type),
     skills_needed: compactField(chooseField(fields.skills_needed, fallbackFields.skills_needed), 6, 520),
     project_scope: compactField(chooseField(fields.project_scope, fallbackFields.project_scope), 3, 650),
-    start_date: chooseField(fields.start_date, fallbackFields.start_date),
+    start_date: chooseField(fallbackFields.start_date, ""),
     next_steps: compactField(chooseField(fields.next_steps, fallbackFields.next_steps, { nextStep: true }), 3, 620),
     if_lost_reason: compactField(chooseField(fields.if_lost_reason, fallbackFields.if_lost_reason), 1, 220)
   };
