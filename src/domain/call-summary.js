@@ -20,6 +20,25 @@ function shorten(value, maxLength = 220) {
   return `${(boundary > 80 ? clipped.slice(0, boundary) : clipped).trim()}...`;
 }
 
+function isTranscriptChunk(value) {
+  const text = cleanText(value);
+  if (!text) return true;
+  return /\b(VIEW RECORDING|Transcript:|Call title:|Attached transcript:)\b/i.test(text)
+    || /(^|\s)@\d{1,2}:\d{2}\s*-/i.test(text)
+    || /\b(?:Camila Bagnati|Franco Pereyra|Franco|Cami|Near|Client|Speaker)\s*:/i.test(text)
+    || /Extra transcript context/i.test(text)
+    || text.length > 520;
+}
+
+function splitCommaList(chunk) {
+  const text = cleanText(chunk);
+  if ((text.match(/,/g) || []).length < 2 || /[.!?]/.test(text)) return [chunk];
+  const parts = text.split(",").map((part) => cleanText(part)).filter(Boolean);
+  if (parts.length < 3) return [chunk];
+  if (parts.some((part) => part.length > 45)) return [chunk];
+  return parts;
+}
+
 function splitPoints(value, maxItems = 2) {
   const raw = String(value || "")
     .replace(/\r/g, "\n")
@@ -30,9 +49,12 @@ function splitPoints(value, maxItems = 2) {
     .replace(/\n\s*\d+\.\s*/g, "\n");
   const chunks = normalized
     .split(/\n+|;\s+/)
-    .flatMap((chunk) => chunk.split(/(?<=[.!?])\s+(?=[A-Z])/))
-    .map((chunk) => shorten(chunk))
+    .flatMap((chunk) => chunk.split(/(?<=[.!?])\s+(?=[A-Z0-9$])/))
+    .flatMap(splitCommaList)
+    .map((chunk) => cleanText(chunk))
     .filter(Boolean)
+    .filter((chunk) => !isTranscriptChunk(chunk))
+    .map((chunk) => shorten(chunk))
     .filter((chunk) => !/^speaker\s*\d*:?$/i.test(chunk));
 
   return [...new Set(chunks)].slice(0, maxItems);
@@ -48,7 +70,8 @@ function sectionFromNotes(notes, label) {
     .join("|");
   const pattern = new RegExp(`${escaped}:?\\s*\\n([\\s\\S]*?)(?=\\n(?:${nextLabels}):?\\s*\\n|$)`, "i");
   const match = text.match(pattern);
-  return match ? match[1] : "";
+  if (!match) return "";
+  return isTranscriptChunk(match[1]) ? "" : match[1];
 }
 
 function firstValue(input, section) {
@@ -60,9 +83,9 @@ function firstValue(input, section) {
 }
 
 function sectionMaxItems(label) {
-  if (label === "Key questions asked") return 4;
-  if (label === "Next steps") return 3;
-  if (label === "Skills needed") return 3;
+  if (label === "Key questions asked") return 3;
+  if (label === "Next steps") return 2;
+  if (label === "Skills needed") return 4;
   return 2;
 }
 
@@ -71,8 +94,10 @@ function callSummarySections(input = {}) {
     const fallback = section.label === "Need"
       ? firstNonEmpty(input.project_scope, input["Project Scope"])
       : "";
-    const value = firstNonEmpty(firstValue(input, section), fallback);
-    const points = splitPoints(value, sectionMaxItems(section.label));
+    const maxItems = sectionMaxItems(section.label);
+    const primaryPoints = splitPoints(firstValue(input, section), maxItems);
+    const fallbackPoints = primaryPoints.length ? [] : splitPoints(fallback, maxItems);
+    const points = primaryPoints.length ? primaryPoints : fallbackPoints;
     return {
       label: section.label,
       points: points.length ? points : ["Not captured."]
@@ -88,12 +113,13 @@ function formatCallSummary(input = {}) {
 
 function formatSlackCallSummary(input = {}) {
   return callSummarySections(input)
+    .filter((section) => !(section.points.length === 1 && section.points[0] === "Not captured."))
     .map((section) => `*${section.label}*\n${section.points.map((point) => `- ${point}`).join("\n")}`)
     .join("\n\n");
 }
 
 function compactField(value, maxItems = 2, maxLength = 500) {
-  return splitPoints(value, maxItems).join(" ").slice(0, maxLength).trim();
+  return splitPoints(value, maxItems).join("; ").slice(0, maxLength).trim();
 }
 
 module.exports = {
