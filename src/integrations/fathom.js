@@ -13,6 +13,17 @@ function transcriptToText(value) {
     .join("\n");
 }
 
+function transcriptFromApiResponse(data = {}) {
+  return firstRawNonEmpty(
+    transcriptToText(data.transcript),
+    data.transcript_text,
+    data.text,
+    transcriptToText(data.recording?.transcript),
+    data.recording?.transcript_text,
+    data.recording?.text
+  );
+}
+
 function firstRawNonEmpty(...values) {
   for (const value of values) {
     if (cleanText(value)) return String(value);
@@ -219,7 +230,7 @@ async function fetchFathomApiTranscript(config, recordingIdOrUrl) {
         })
         .join("\n");
     }
-    return firstNonEmpty(data.transcript, data.transcript_text, data.text, data.recording?.transcript);
+    return transcriptFromApiResponse(data);
   }
 
   return "";
@@ -252,18 +263,22 @@ async function fetchFathomShareRecording(config, shareUrl) {
   const html = await pageResponse.text();
   const metadata = parseFathomSharePage(html, shareUrl);
   let transcriptText = "";
-  let summaryText = metadata.summaryText || "";
+  let summaryText = "";
 
-  if (!summaryText && metadata.recordingId) {
+  if (metadata.recordingId) {
     summaryText = await fetchFathomApiSummary(config, metadata.recordingId);
   }
 
-  if (metadata.copyTranscriptUrl) {
+  if (metadata.recordingId) {
+    transcriptText = await fetchFathomApiTranscript(config, metadata.recordingId);
+  }
+
+  if (!transcriptText && metadata.copyTranscriptUrl) {
     const transcriptUrl = new URL(metadata.copyTranscriptUrl, shareUrl).toString();
     const transcriptResponse = await fetch(transcriptUrl, { headers: { Accept: "application/json" } });
     if (transcriptResponse.ok) {
       const data = await transcriptResponse.json();
-      transcriptText = firstRawNonEmpty(
+      transcriptText = firstRawNonEmpty(transcriptText,
         data.text,
         data.transcript_text,
         transcriptToText(data.transcript),
@@ -291,11 +306,7 @@ async function fetchFathomShareRecording(config, shareUrl) {
     }
   }
 
-  if (!transcriptText && metadata.recordingId) {
-    transcriptText = await fetchFathomApiTranscript(config, metadata.recordingId);
-  }
-
-  return { ...metadata, summaryText, transcriptText };
+  return { ...metadata, summaryText: firstRawNonEmpty(summaryText, metadata.summaryText), transcriptText };
 }
 
 async function fetchFathomRecording(config, recordingIdOrUrl) {
