@@ -2,7 +2,7 @@ const { SHEETS } = require("../schema");
 const { extractCallFields } = require("../ai/extract");
 const { generateHandoffMessage } = require("../domain/handoff");
 const { fetchFathomRecording } = require("../integrations/fathom");
-const { cleanText, entityKey, firstNonEmpty, nowIso, sheetDate, sheetDateTime, splitName, stableId } = require("../domain/normalize");
+const { cleanText, domainFromEmail, entityKey, firstNonEmpty, nowIso, sheetDate, sheetDateTime, splitName, stableId } = require("../domain/normalize");
 
 function isLikelyTranscript(text) {
   const value = String(text || "");
@@ -30,6 +30,14 @@ function slackPermalink(channelId, ts) {
 }
 
 const ACQUISITION_SOURCES = ["Outreach", "Customer", "Referral", "Girdley Media"];
+const OWNER_ALIASES = new Map([
+  ["fp", "Franco Pereyra"],
+  ["franco", "Franco Pereyra"],
+  ["cb", "Camila Bagnati"],
+  ["camila", "Camila Bagnati"],
+  ["cami", "Camila Bagnati"],
+  ["cammie", "Camila Bagnati"]
+]);
 
 function acquisitionSource(...values) {
   for (const value of values) {
@@ -64,11 +72,15 @@ class OpsService {
   async canonicalOwner(owner) {
     const requested = cleanText(owner);
     if (!requested) return "";
+    const localAlias = OWNER_ALIASES.get(requested.toLowerCase());
+    if (localAlias) return localAlias;
     try {
       const configTable = await this.repository.read(SHEETS.config);
       const match = configTable.rows.find((row) => {
         if (row.Type !== "owner_alias") return false;
-        return [row.Key, row.Value, row["Slack User ID"]]
+        const values = [row.Key, row.Value, row["Slack User ID"]];
+        const firstName = cleanText(row.Value).split(" ")[0];
+        return [...values, firstName]
           .map((value) => cleanText(value).toLowerCase())
           .includes(requested.toLowerCase());
       });
@@ -119,6 +131,8 @@ class OpsService {
     const hasSpecificIdentity = input.email || input.Email || input.companyDomain || input["Company Domain"];
     const existingByCompany = company && !hasSpecificIdentity ? await this.repository.findDealByCompany(company) : null;
     const base = existingByCompany || {};
+    const email = input.email || input.Email || base.Email || "";
+    const companyDomain = input.companyDomain || input["Company Domain"] || base["Company Domain"] || domainFromEmail(email);
     const key = base["Entity Key"] || input["Entity Key"] || entityKey(input);
     if (!key || key === "|") {
       throw new Error("A deal needs at least a company, company domain, or contact email.");
@@ -128,10 +142,10 @@ class OpsService {
     const row = {
       "Entity Key": key,
       Company: input.company || input.Company || base.Company,
-      "Company Domain": input.companyDomain || input["Company Domain"] || base["Company Domain"] || "",
+      "Company Domain": companyDomain,
       "First Name": input.firstName || input["First Name"] || base["First Name"] || "",
       "Last Name": input.lastName || input["Last Name"] || base["Last Name"] || "",
-      Email: input.email || input.Email || base.Email || "",
+      Email: email,
       Source: acquisitionSource(input.source, input.Source, base.Source),
       Campaign: input.campaign || input.Campaign || base.Campaign || "",
       "Deal Stage": dealStage,
@@ -166,6 +180,7 @@ class OpsService {
       owner: row.Owner,
       source: row.Source,
       stage: "Call Booked",
+      nextStep: row["Next Steps"],
       sourceEventId: input.sourceEventId ? `${input.sourceEventId}:lead` : ""
     });
     await this.repository.addEvent({
