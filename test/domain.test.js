@@ -283,6 +283,7 @@ test("updateDealFromCall creates a deal and lead when a Fathom call has no exist
     "Company domain: pisteyo.com",
     "Contact: Eduardo Suarez",
     "Franco: We can support quick AI automation projects.",
+    "Client: How would you build this and what tools would the engineer use?",
     "Client: We need n8n, Airtable, Supabase, APIs and MCP support.",
     "Franco: Those AI automation engineers are around 70 dolares la hora.",
     "Client: Next step is to send info and schedule a call with my partner.",
@@ -307,10 +308,12 @@ test("updateDealFromCall creates a deal and lead when a Fathom call has no exist
   assert.match(result.row.Pricing, /70/);
   assert.match(result.row.Notes, /Need:/);
   assert.match(result.row.Notes, /Pain points:/);
+  assert.match(result.row.Notes, /Key questions asked:/);
   assert.match(result.row.Notes, /Pricing:/);
   assert.match(result.row.Notes, /Scope of project:/);
   assert.match(result.row.Notes, /Skills needed:/);
-  assert.ok(result.row.Notes.length < 1200);
+  assert.match(result.row.Notes, /Next steps:/);
+  assert.ok(result.row.Notes.length < 1400);
   assert.doesNotMatch(result.row.Notes, /Extra transcript context Extra transcript context/);
   assert.equal(upserts[0].sheetName, "Deals");
   assert.equal(upserts[1].sheetName, "Leads");
@@ -338,6 +341,9 @@ test("Fathom Slack replies recap deal, lead, and filled fields", async () => {
               "Pain points:",
               "- Current process is manual.",
               "",
+              "Key questions asked:",
+              "- How would you build this?",
+              "",
               "Pricing:",
               "- $70/hr",
               "",
@@ -345,7 +351,10 @@ test("Fathom Slack replies recap deal, lead, and filled fields", async () => {
               "- Build n8n and Airtable automations.",
               "",
               "Skills needed:",
-              "- n8n, Airtable"
+              "- n8n, Airtable",
+              "",
+              "Next steps:",
+              "- Send recap"
             ].join("\n"),
             "Next Steps": "Send recap"
           }
@@ -357,8 +366,10 @@ test("Fathom Slack replies recap deal, lead, and filled fields", async () => {
   assert.match(text, /Fathom update for Pisteyo: updated the deal and created the lead/);
   assert.match(text, /\*Need\*\n- Automate customer-facing workflows/);
   assert.match(text, /\*Pain points\*\n- Current process is manual/);
+  assert.match(text, /\*Key questions asked\*\n- How would you build this/);
   assert.match(text, /\*Pricing\*\n- \$70\/hr/);
-  assert.ok(text.length < 1200);
+  assert.match(text, /\*Next steps\*\n- Send recap/);
+  assert.ok(text.length < 1400);
 });
 
 test("inferCompanyFromThread finds company in prior Slack context", async () => {
