@@ -999,6 +999,35 @@ test("Fathom payload normalizes transcript and recording identity", () => {
   assert.equal(payload.transcriptText, "Client: Need Zapier and APIs.");
 });
 
+test("Fathom payload uses calendar invitees and recording start time", () => {
+  const payload = normalizeFathomPayload({
+    recording_id: "rec_2",
+    share_url: "https://fathom.video/share/rec_2",
+    recording_start_time: "2026-06-01T20:30:00.000Z",
+    calendar_invitees: [
+      { name: "Camila Bagnati", email: "camila@hirewithnear.com" },
+      { name: "Chad", email: "chad@clinow.com" }
+    ],
+    summary: { markdown_formatted: "Exploring fractional AI engineering support." },
+    transcript: [
+      {
+        speaker: { display_name: "Chad", matched_calendar_invitee_email: "chad@clinow.com" },
+        text: "What is the all-in hourly cost?"
+      }
+    ]
+  });
+
+  assert.equal(payload.sourceEventId, "rec_2");
+  assert.equal(payload.recordingId, "rec_2");
+  assert.equal(payload.url, "https://fathom.video/share/rec_2");
+  assert.equal(payload.companyDomain, "clinow.com");
+  assert.equal(payload.contactName, "Chad");
+  assert.equal(payload.email, "chad@clinow.com");
+  assert.equal(payload.callDate, "2026-06-01T20:30:00.000Z");
+  assert.match(payload.summaryText, /fractional AI engineering/);
+  assert.equal(payload.transcriptText, "Chad <chad@clinow.com>: What is the all-in hourly cost?");
+});
+
 test("weekly metrics preview excludes completed campaigns and preserves week history key", async () => {
   const upserts = [];
   const repository = {
