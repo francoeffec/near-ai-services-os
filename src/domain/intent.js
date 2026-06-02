@@ -100,6 +100,7 @@ function normalizeSlackMarkup(text) {
     .replace(/<mailto:([^|>]+)(?:\|[^>]+)?>/gi, "$1")
     .replace(/<(https?:\/\/[^>]+)>/gi, "$1")
     .replace(/<@[^>]+>/g, "")
+    .replace(/\*Sent using\*\s+ChatGPT/gi, "")
     .replace(/^\s*-\s*/, "");
 }
 
