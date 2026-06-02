@@ -133,15 +133,52 @@ function answerAsInstruction(field, answer) {
   return "";
 }
 
+function isTrackerBotMessage(message = {}) {
+  const text = cleanText(message.text || "");
+  if (!text) return true;
+  if (message.bot_id || message.subtype === "bot_message") return true;
+  return /^(?:Before I update the tracker|I could not confidently map|I could not complete that|Fathom update for|Created lead:|Updated lead:|Created deal:|Updated deal:|Moved .+ to|Assigned .+ to)/i.test(text);
+}
+
 function buildClarifiedIntent(messages = [], replyText = "") {
-  const questionMessage = messages.slice().reverse().find((message) => /Before I update the tracker/i.test(message.text || ""));
-  if (!questionMessage) return null;
-  const field = clarificationFieldFromQuestion(questionMessage.text || "");
-  const instruction = answerAsInstruction(field, replyText);
-  if (!instruction) return null;
-  const originalMessage = messages.find((message) => cleanText(message.text) && !/Before I update the tracker/i.test(message.text || ""));
-  if (!originalMessage) return null;
-  return parseIntent(`${originalMessage.text}\n${instruction}`);
+  const replayMessages = messages.slice();
+  const cleanReplyText = cleanText(replyText);
+  const lastMessageText = cleanText(replayMessages[replayMessages.length - 1]?.text);
+  if (cleanReplyText && cleanReplyText !== lastMessageText) {
+    replayMessages.push({ text: cleanReplyText });
+  }
+
+  const context = [];
+  let pendingField = "";
+  let sawClarificationQuestion = false;
+
+  for (const message of replayMessages) {
+    const text = cleanText(message.text);
+    if (!text) continue;
+
+    if (isTrackerBotMessage(message)) {
+      const field = clarificationFieldFromQuestion(text);
+      if (field) {
+        pendingField = field;
+        sawClarificationQuestion = true;
+      }
+      continue;
+    }
+
+    if (pendingField) {
+      const instruction = answerAsInstruction(pendingField, text);
+      if (instruction) {
+        context.push(instruction);
+        pendingField = "";
+        continue;
+      }
+    }
+
+    context.push(text);
+  }
+
+  if (!sawClarificationQuestion || context.length === 0) return null;
+  return parseIntent(context.join("\n"));
 }
 
 async function intentFromClarificationThread({ client, channel, threadTs, replyText }) {
