@@ -275,11 +275,12 @@ function pointList(points, max = 2) {
   return [...new Set(points.map(cleanText).filter(Boolean))].slice(0, max).join("\n");
 }
 
-function canonicalQuestion(question) {
+function canonicalQuestion(question, company = "") {
   const text = cleanText(question).replace(/\s*\?+\s*$/g, "");
   const lower = text.toLowerCase();
+  const prospect = cleanText(company) || "the prospect";
   if (!text) return "";
-  if (/qu[eé] seguir[ií]a|siguiente paso|si yo decidiera|c[oó]mo funciona esa parte/.test(lower)) return "What would the next step be if Pisteyo decides to move forward?";
+  if (/qu[eé] seguir[ií]a|siguiente paso|si yo decidiera|c[oó]mo funciona esa parte/.test(lower)) return `What would the next step be if ${prospect} decides to move forward?`;
   if (/empleados.*(?:freelance|pool)|pool.*freelance|son empleados/.test(lower)) return "Are the engineers Near employees or freelancers?";
   if (/way of working|modelo.*(?:c[oó]mo|funciona)|c[oó]mo es.*modelo|c[oó]mo funciona|staff augmentation|recursos humanos tecnológicos/.test(lower)) return "How does Near's working model and engagement process work?";
   if (/machine learning|ingenieros de machine|construyan en data/.test(lower)) return "Does this require machine-learning engineers or AI automation builders?";
@@ -298,23 +299,23 @@ function canonicalQuestion(question) {
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}?`;
 }
 
-function keyQuestionsFromTurns(turns) {
+function keyQuestionsFromTurns(turns, company = "") {
   const questions = [];
   for (const turn of turns.filter((item) => !isNearSpeaker(item.speaker))) {
     const text = cleanText(turn.text);
     const explicit = text.match(/[^.!?]*\?/g) || [];
-    for (const candidate of explicit) questions.push(canonicalQuestion(candidate));
+    for (const candidate of explicit) questions.push(canonicalQuestion(candidate, company));
 
     if (!explicit.length) {
       if (/\b(all[-\s]?in cost|cost|how much|full[-\s]?time|part[-\s]?time|talent|fractional|what kind)\b/i.test(text)) {
-        questions.push(canonicalQuestion(text));
+        questions.push(canonicalQuestion(text, company));
       }
     }
   }
   const priority = [
     /Near employees or freelancers/i,
     /working model and engagement process/i,
-    /next step.*Pisteyo/i,
+    /next step.*(?:move forward|decides)/i,
     /machine-learning engineers/i,
     /cost versus expensive/i,
     /all-in hourly cost/i,
@@ -409,13 +410,14 @@ function extractPainPoints(body) {
   return pointList(points, 3);
 }
 
-function extractScopePoints(body) {
+function extractScopePoints(body, company = "") {
   const points = [];
+  const prospect = cleanText(company) || "the prospect";
   if (/input call with an engineer|meet the engineer|walk them through/i.test(body)) {
     points.push("Run an engineer input call to define one priority workflow or bottleneck and estimate hours.");
   }
   if (/discovery|discoveries|levantar.*casos de uso|roadmaps?|propuesta de tiempos y costos/i.test(body)) {
-    points.push("Support Pisteyo across discovery, solution design, cost estimates, and implementation for client AI projects.");
+    points.push(`Support ${prospect} across discovery, solution design, cost estimates, and implementation for client AI projects.`);
   }
   if (/quick wins|pruebas de concepto|rápidos de implementar|airtable|supabase|n8n|zapier|make\.com|\bmake\b(?=\s*(?:,|\/|y\b|o\b|and\b|de\b))/i.test(body)) {
     points.push("Build quick AI automation proofs of concept using tools like n8n, Make, Zapier, Airtable, Supabase, APIs, and agents.");
@@ -532,6 +534,8 @@ function heuristicCallExtraction(text) {
   const raw = String(text || "");
   const body = cleanText(raw);
   const turns = parseTranscriptTurns(raw);
+  const company = extractCompanyName(raw);
+  const companyDomain = extractCompanyDomain(raw);
   const skills = collectSkills(body);
   const pricing = extractPricingPoints(body)
     || (body.match(/\$[0-9,]+(?:\s*\/\s*(?:month|mo|hour|hr|week))?/i) || [])[0]
@@ -542,8 +546,8 @@ function heuristicCallExtraction(text) {
     : (body.match(/\b[0-9]{1,3}\s*(?:hours|hrs|h)\/?(?:week|wk)?\b/i) || [])[0] || "";
 
   return {
-    company: extractCompanyName(raw),
-    company_domain: extractCompanyDomain(raw),
+    company,
+    company_domain: companyDomain,
     contact_name: extractContactName(raw),
     contact_email: firstExternalEmail(raw),
     deal_stage: extractDealStage(body),
@@ -552,9 +556,9 @@ function heuristicCallExtraction(text) {
     engineer_type: skills ? (/architect/i.test(body) ? "AI Automation Engineer / AI Architect" : "AI Automation Engineer") : "",
     need: extractNeedPoints(body),
     pain_points: extractPainPoints(body),
-    key_questions: keyQuestionsFromTurns(turns),
+    key_questions: keyQuestionsFromTurns(turns, company),
     skills_needed: skills,
-    project_scope: extractScopePoints(body),
+    project_scope: extractScopePoints(body, company),
     start_date: extractStartDate(body),
     next_steps: extractNextSteps(body),
     notes: "",
