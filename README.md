@@ -84,6 +84,8 @@ Fathom direct webhooks should post to:
 https://YOUR_HOST/webhooks/fathom?secret=WEBHOOK_SHARED_SECRET
 ```
 
+If Fathom webhook signing is enabled, set `FATHOM_WEBHOOK_SECRET` instead of using the query-string shared secret. The service verifies `webhook-id`, `webhook-timestamp`, and `webhook-signature` before processing the payload.
+
 When Fathom sends summary, transcript, calendar invitees, and recording start time, the service uses that grounded API/webhook data before falling back to raw transcript parsing.
 
 ## Deployment
