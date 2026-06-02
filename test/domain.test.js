@@ -425,6 +425,7 @@ test("updateDealFromCall clears stale call-date start dates when no start date w
 
   assert.equal(result.row["Start Date"], "");
   assert.equal(result.row["Handoff Status"], "");
+  assert.equal(result.row["Call Had Date"], "Jun 1, 2026");
   assert.deepEqual(upserts.find((upsert) => upsert.sheetName === "Deals").row.__clear, ["Start Date", "Handoff Status"]);
 });
 
