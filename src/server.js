@@ -1,4 +1,5 @@
 const express = require("express");
+const { extractionStatus } = require("./config");
 const { bootstrapSpreadsheet } = require("./sheets/bootstrap");
 const { normalizeBooking } = require("./integrations/booking");
 const { normalizeFathomPayload, fetchFathomTranscript } = require("./integrations/fathom");
@@ -40,7 +41,7 @@ function attachRoutes({ receiver, config, opsService, repository, sheetsClient }
         repository.read("Events"),
         repository.read("Config")
       ]);
-      res.json({ ok: true, sheet: "ready" });
+      res.json({ ok: true, sheet: "ready", extraction: extractionStatus(config) });
     } catch (error) {
       res.status(503).json({ ok: false, error: error.message });
     }
