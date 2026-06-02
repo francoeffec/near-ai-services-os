@@ -750,6 +750,40 @@ test("Fathom Slack replies recap deal, lead, and filled fields", async () => {
   assert.ok(text.length < 1400);
 });
 
+test("Fathom Slack replies reject transcript-like row notes and keep recap scannable", async () => {
+  const text = await handleIntent({
+    intent: { type: "update_deal_from_call", fathomUrl: "https://fathom.video/share/abc" },
+    opsService: {
+      async updateDealFromCall() {
+        return {
+          created: false,
+          leadResult: { created: false, row: { Company: "Clinow" } },
+          row: {
+            Company: "Clinow",
+            "Project Scope": "Run an engineer input call to define one priority workflow or bottleneck and estimate hours.",
+            "Skills Needed": "Claude, Python, AI agents, systems integration, workflow automation",
+            Notes: [
+              "Need:",
+              "@0:46 - chad",
+              "I got an email talking about AI and a fractional person. Extra transcript context ".repeat(15),
+              "",
+              "Next steps:",
+              "Franco: They would suggest how to build it and suggest an amount of hours."
+            ].join("\n"),
+            "Next Steps": "Prospect to review the information and decide whether to schedule an engineer input call."
+          }
+        };
+      }
+    }
+  });
+
+  assert.match(text, /\*Need\*\n- Run an engineer input call/);
+  assert.match(text, /\*Skills needed\*\n- Claude\n- Python\n- AI agents\n- systems integration/);
+  assert.match(text, /\*Next steps\*\n- Prospect to review the information/);
+  assert.doesNotMatch(text, /@0:46|Extra transcript context|Franco:|They would suggest/);
+  assert.ok(text.length < 1200);
+});
+
 test("inferCompanyFromThread finds company in prior Slack context", async () => {
   const client = {
     conversations: {
