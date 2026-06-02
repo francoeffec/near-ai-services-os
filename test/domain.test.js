@@ -486,6 +486,58 @@ test("call extraction turns Clinow-style transcript into sales-ready fields", as
   assert.ok(fields.notes.length < 1800);
 });
 
+test("call extraction handles Spanish agency-style AI services calls", async () => {
+  const transcript = [
+    "Call title: AI Automation //Pisteyo + Near",
+    "Company: Pisteyo",
+    "Company domain: pisteyo.com",
+    "@0:00 - Franco Pereyra (Near)",
+    "Contame que estan buscando.",
+    "@0:20 - eduardosuarez",
+    "Somos una consultora americana que hace estrategia y build. No nos alcanzan las manos para hacer desarrollo y necesitamos para Colombia y Latinoamerica.",
+    "@1:00 - Camila Bagnati",
+    "Que tipo de desarrolladores contratan?",
+    "@1:10 - eduardosuarez",
+    "Gente que sepa Python, automatizaciones, n8n, Make, Zapier, Airtable, Supabase, APIs, MCP, Copilot Agents, Custom GPTs y Prompt Engineering.",
+    "@2:00 - eduardosuarez",
+    "No ha sido facil conseguir gente buena. Muchos dicen saber AI pero cuando entramos a proyectos son autodidactas y algunos son costosos.",
+    "@3:00 - eduardosuarez",
+    "Pero son empleados de ustedes o tienen un pool de freelance? Como funciona?",
+    "@4:00 - eduardosuarez",
+    "Tenemos clientes que nos dicen necesito resolver esto con AI. Grabamos el proceso, vamos a un ingeniero y nos da propuesta de tiempos y costos.",
+    "@5:00 - Franco Pereyra (Near)",
+    "Podemos sumarnos en Discovery, diagramar la solucion o implementar.",
+    "@6:00 - eduardosuarez",
+    "Tengo hoy un par de proyectos que necesito sacar costos y pasar propuestas. Como funciona esa parte? Tenemos tres discoveries grandes para levantar entre 10 y 15 casos de uso por compania.",
+    "@7:00 - eduardosuarez",
+    "Nos gustan quick wins, pruebas de concepto faciles, poner Supabase, Airtable y n8n. Quiero mostrarle esto a mi socio de operaciones y produccion.",
+    "@8:00 - Camila Bagnati",
+    "Te enviamos todo y me contacto por WhatsApp para coordinar esa llamada siguiente con tu partner la semana que viene."
+  ].join("\n");
+
+  const fields = await extractCallFields({ ai: { apiKey: "" } }, transcript);
+
+  assert.equal(fields.company, "Pisteyo");
+  assert.equal(fields.company_domain, "pisteyo.com");
+  assert.equal(fields.contact_name, "Eduardo Suarez");
+  assert.equal(fields.deal_stage, "Considering");
+  assert.match(fields.need, /flexible AI automation\/development capacity/);
+  assert.match(fields.need, /estimating and scoping/);
+  assert.match(fields.pain_points, /capacity is constrained/);
+  assert.match(fields.pain_points, /expensive/);
+  assert.match(fields.key_questions, /Near employees or freelancers/);
+  assert.match(fields.key_questions, /next step be if Pisteyo/);
+  assert.match(fields.skills_needed, /n8n/);
+  assert.match(fields.skills_needed, /Zapier/);
+  assert.match(fields.skills_needed, /Supabase/);
+  assert.match(fields.project_scope, /discovery, solution design, cost estimates/);
+  assert.match(fields.project_scope, /quick AI automation proofs of concept/);
+  assert.match(fields.next_steps, /share Near's information/);
+  assert.match(fields.next_steps, /WhatsApp or calendar/);
+  assert.doesNotMatch(fields.notes, /@\d{1,2}:\d{2}|Transcript:|VIEW RECORDING|Franco Pereyra|Camila Bagnati/);
+  assert.ok(fields.notes.length < 1800);
+});
+
 test("normalization rejects transcript-like and unsafe AI fields", () => {
   const normalized = normalizeCallFields(
     {
