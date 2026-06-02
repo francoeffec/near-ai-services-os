@@ -112,4 +112,27 @@ function validateConfig(config, { requireIntegrations = false } = {}) {
   };
 }
 
-module.exports = { loadConfig, validateConfig };
+function extractionStatus(config) {
+  const openaiConfigured = Boolean(config.ai?.apiKey);
+  const fathomApiConfigured = Boolean(config.fathom?.apiKey);
+  const warnings = [];
+
+  if (!openaiConfigured) {
+    warnings.push("OPENAI_API_KEY is missing; Fathom call extraction is using deterministic transcript rules only.");
+  }
+  if (!fathomApiConfigured) {
+    warnings.push("FATHOM_API_KEY is missing; dropped share URLs cannot use Fathom's official recording summary endpoint.");
+  }
+
+  return {
+    openaiConfigured,
+    fathomApiConfigured,
+    mode: openaiConfigured
+      ? (fathomApiConfigured ? "fathom_summary_plus_ai" : "transcript_plus_ai")
+      : (fathomApiConfigured ? "fathom_summary_plus_rules" : "transcript_rules_only"),
+    robust: openaiConfigured && fathomApiConfigured,
+    warnings
+  };
+}
+
+module.exports = { extractionStatus, loadConfig, validateConfig };
