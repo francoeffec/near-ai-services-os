@@ -322,6 +322,61 @@ test("updateDealFromCall creates a deal and lead when a Fathom call has no exist
   assert.equal(events.at(-1).eventType, "deal_upserted");
 });
 
+test("updateDealFromCall clears stale call-date start dates when no start date was discussed", async () => {
+  const existingDeal = {
+    "Deal ID": "deal_clinow",
+    "Entity Key": "clinow.com|",
+    Company: "Clinow",
+    "Company Domain": "clinow.com",
+    "Deal Stage": "Considering",
+    "Call Had Date": "2026-06-01T20:30:00.000Z",
+    "Start Date": "2026-06-01T07:00:00.000Z"
+  };
+  const upserts = [];
+  const repository = {
+    async read(sheetName) {
+      if (sheetName === "Config") return { headers: [], rows: [] };
+      return { headers: [], rows: [] };
+    },
+    async findDealByCompany() {
+      return null;
+    },
+    async findDealByKey() {
+      return existingDeal;
+    },
+    async upsert(sheetName, keyHeader, keyValue, row) {
+      const existing = sheetName === "Deals" ? existingDeal : {};
+      const merged = mergePreservingExisting(existing, row);
+      upserts.push({ sheetName, keyHeader, keyValue, row, merged });
+      return { row: merged, created: false };
+    },
+    async addEvent() {}
+  };
+  const service = new OpsService({
+    repository,
+    slackClient: null,
+    config: { ai: { apiKey: "" }, fathom: {}, slack: {} }
+  });
+
+  const result = await service.updateDealFromCall({
+    fathomUrl: "https://fathom.video/share/clinow",
+    transcriptText: [
+      "Call title: AI Automation // Clinow + Near",
+      "Company: Clinow",
+      "Company domain: clinow.com",
+      "Call date: 2026-06-01T20:30:00.000Z",
+      "Chad: What is the all-in hourly cost?",
+      "Camila: It is seventy dollars per hour all in.",
+      "Chad: I need to review the information and decide if an engineer input call makes sense.",
+      "Extra transcript context ".repeat(40)
+    ].join("\n"),
+    autoCreateDeal: true
+  });
+
+  assert.equal(result.row["Start Date"], "");
+  assert.deepEqual(upserts.find((upsert) => upsert.sheetName === "Deals").row.__clear, ["Start Date"]);
+});
+
 test("call extraction turns Clinow-style transcript into sales-ready fields", async () => {
   const transcript = [
     "Call title: AI Automation // Clinow + Near",
@@ -384,12 +439,19 @@ test("normalization rejects transcript-like and unsafe AI fields", () => {
   const normalized = normalizeCallFields(
     {
       deal_stage: "Contract Signed",
+      need: "Run an engineer input call to define one priority workflow or bottleneck and estimate hours.",
+      pain_points: "Not captured.",
+      key_questions: "Not captured.",
       project_scope: "Call title: AI Automation // Clinow + Near\nTranscript:\n@0:00 - Camila Bagnati (Near)\nNice to meet you.",
       next_steps: "They would suggest how to build it. They would suggest an amount of hours.",
+      start_date: "2026-06-01T07:00:00.000Z",
       notes: "Transcript dump"
     },
     {
       deal_stage: "Considering",
+      need: "Exploring fractional AI engineering support and how the model works.",
+      pain_points: "Local hiring in Fort Wayne is taking longer than expected.",
+      key_questions: "What is the all-in hourly cost?",
       project_scope: "Run an engineer input call to define one priority workflow.",
       next_steps: "Near to send information. Prospect to review and decide whether to schedule an engineer input call.",
       pricing: "$70/hr all-in"
@@ -397,9 +459,48 @@ test("normalization rejects transcript-like and unsafe AI fields", () => {
   );
 
   assert.equal(normalized.deal_stage, "Considering");
+  assert.match(normalized.need, /Exploring fractional/);
+  assert.match(normalized.pain_points, /Local hiring/);
+  assert.match(normalized.key_questions, /all-in hourly cost/);
   assert.match(normalized.project_scope, /engineer input call/);
   assert.match(normalized.next_steps, /Prospect to review/);
+  assert.equal(normalized.start_date, "");
   assert.doesNotMatch(normalized.notes, /Transcript dump|Nice to meet you|They would suggest/i);
+});
+
+test("Fathom Slack replies use extracted summary over row fallbacks", async () => {
+  const text = await handleIntent({
+    intent: { type: "update_deal_from_call", fathomUrl: "https://fathom.video/share/clinow" },
+    opsService: {
+      async updateDealFromCall() {
+        return {
+          created: false,
+          leadResult: { created: false, row: { Company: "Clinow" } },
+          row: {
+            Company: "Clinow",
+            "Project Scope": "Run an engineer input call to define one priority workflow or bottleneck and estimate hours.",
+            "Fathom URL": "https://fathom.video/share/clinow",
+            Pricing: "$70/hr"
+          },
+          callSummary: {
+            need: "Exploring fractional AI engineering support and how the model works.",
+            pain_points: "Local hiring in Fort Wayne is taking longer than expected.",
+            key_questions: "What is the all-in hourly cost?",
+            pricing: "$70/hr all-in",
+            project_scope: "Run an engineer input call to define one priority workflow.",
+            skills_needed: "Claude, Python, AI agents",
+            next_steps: "Prospect to review the information and decide whether to schedule an engineer input call."
+          }
+        };
+      }
+    }
+  });
+
+  assert.match(text, /\*Need\*\n- Exploring fractional AI engineering support/);
+  assert.match(text, /\*Pain points\*\n- Local hiring in Fort Wayne/);
+  assert.match(text, /\*Key questions asked\*\n- What is the all-in hourly cost/);
+  assert.match(text, /\*Next steps\*\n- Prospect to review the information/);
+  assert.doesNotMatch(text, /\*Pain points\*\n- Not captured/);
 });
 
 test("Fathom Slack replies recap deal, lead, and filled fields", async () => {
