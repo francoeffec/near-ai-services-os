@@ -430,7 +430,7 @@ function safeField(value, { allowLong = false, nextStep = false } = {}) {
   if (isWeakValue(text)) return "";
   if (hasTranscriptLeak(text)) return "";
   if (!allowLong && text.length > 700) return "";
-  if (nextStep && /\b(they would suggest|if you agree|if you're ready|work product)\b/i.test(text)) return "";
+  if (nextStep && /\b(they would suggest|would suggest how|suggest an amount|if you agree|if you're ready|work product|next steps? (?:are|is) unclear)\b/i.test(text)) return "";
   return text;
 }
 
