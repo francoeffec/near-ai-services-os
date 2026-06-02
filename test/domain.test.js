@@ -465,6 +465,60 @@ test("updateDealFromCall clears stale call-date start dates when no start date w
   assert.deepEqual(upserts.find((upsert) => upsert.sheetName === "Deals").row.__clear, ["Start Date", "Handoff Status"]);
 });
 
+test("updateDealFromCall uses supplied Fathom summary before raw transcript", async () => {
+  const upserts = [];
+  const repository = {
+    async read(sheetName) {
+      if (sheetName === "Config") return { headers: [], rows: [] };
+      return { headers: [], rows: [] };
+    },
+    async findDealByCompany() {
+      return null;
+    },
+    async findDealByKey() {
+      return null;
+    },
+    async upsert(sheetName, keyHeader, keyValue, row) {
+      upserts.push({ sheetName, keyHeader, keyValue, row });
+      return { row, created: true };
+    },
+    async addEvent() {}
+  };
+  const service = new OpsService({
+    repository,
+    slackClient: null,
+    config: { ai: { apiKey: "" }, fathom: {}, slack: {} }
+  });
+
+  const result = await service.updateDealFromCall({
+    company: "Clinow",
+    companyDomain: "clinow.com",
+    firstName: "Chad",
+    callDate: "2026-06-01T20:30:00.000Z",
+    summaryText: [
+      "Fathom summary:",
+      "Exploring fractional AI engineering support and how the model works.",
+      "Local hiring in Fort Wayne is taking longer than expected.",
+      "Near will send information on the different models, example profiles, and a calendar link.",
+      "$70/hr all-in for fractional AI engineering."
+    ].join("\n"),
+    transcriptText: [
+      "Client: Thanks for the call.",
+      "Camila: Great, I will follow up.",
+      "Extra transcript context ".repeat(40)
+    ].join("\n"),
+    autoCreateDeal: true
+  });
+
+  assert.equal(result.row["Call Had Date"], "Jun 1, 2026");
+  assert.match(result.row.Notes, /Exploring fractional AI engineering support/);
+  assert.match(result.row.Notes, /Local hiring in Fort Wayne/);
+  assert.match(result.row.Notes, /Near to send information/);
+  assert.doesNotMatch(result.row.Notes, /Extra transcript context Extra transcript context/);
+  assert.equal(upserts[0].sheetName, "Deals");
+  assert.equal(upserts[1].sheetName, "Leads");
+});
+
 test("call extraction turns Clinow-style transcript into sales-ready fields", async () => {
   const transcript = [
     "Call title: AI Automation // Clinow + Near",
@@ -931,6 +985,7 @@ test("Fathom payload normalizes transcript and recording identity", () => {
     recording: {
       id: "rec_1",
       url: "https://fathom.video/share/rec_1",
+      started_at: "2026-06-01T20:30:00.000Z",
       default_summary: { markdown_formatted: "Fathom summary: needs Zapier support." },
       transcript: [{ speaker: { display_name: "Client" }, text: "Need Zapier and APIs." }]
     },
@@ -939,6 +994,7 @@ test("Fathom payload normalizes transcript and recording identity", () => {
   });
   assert.equal(payload.sourceEventId, "fathom_1");
   assert.equal(payload.recordingId, "rec_1");
+  assert.equal(payload.callDate, "2026-06-01T20:30:00.000Z");
   assert.match(payload.summaryText, /needs Zapier support/);
   assert.equal(payload.transcriptText, "Client: Need Zapier and APIs.");
 });
