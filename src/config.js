@@ -73,7 +73,7 @@ function loadConfig({ strict = true } = {}) {
   };
 }
 
-function validateConfig(config, { requireIntegrations = false } = {}) {
+function validateConfig(config, { requireIntegrations = false, requireRobustExtraction = false } = {}) {
   const missing = [];
   const googleAuthOk = Boolean(
     config.google.serviceAccountJson ||
@@ -93,6 +93,9 @@ function validateConfig(config, { requireIntegrations = false } = {}) {
 
   if (requireIntegrations) {
     required.push(["SMARTLEAD_API_KEY", config.smartlead.apiKey]);
+  }
+  if (requireRobustExtraction) {
+    required.push(["FATHOM_API_KEY", config.fathom.apiKey]);
   }
 
   for (const [name, value] of required) {
