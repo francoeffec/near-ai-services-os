@@ -1,4 +1,5 @@
 const { cleanText, firstNonEmpty } = require("./normalize");
+const { formatSlackCallSummary } = require("./call-summary");
 
 function contactName(row) {
   const joined = [row["First Name"], row["Last Name"]].map(cleanText).filter(Boolean).join(" ");
@@ -14,9 +15,10 @@ function generateHandoffMessage(deal) {
   const hours = cleanText(deal["Hours/Week"]) || cleanText(deal.Hours) || "TBD";
   const startDate = cleanText(deal["Start Date"]) || "TBD";
   const pricing = cleanText(deal.Pricing) || "TBD";
-  const scope = firstNonEmpty(deal["Project Scope"], deal["Project Description"], deal["Call Notes"], deal.Notes, "No scope notes yet.");
+  const scope = firstNonEmpty(deal["Project Scope"], deal["Project Description"], "No scope notes yet.");
   const requirements = cleanText(deal["Candidate/Profile Requirements"]);
   const nextSteps = cleanText(deal["Next Steps"]) || "Confirm recruiting next step.";
+  const callSummary = formatSlackCallSummary(deal);
 
   const lines = [
     `*AI Services handoff: ${company}*`,
@@ -30,6 +32,8 @@ function generateHandoffMessage(deal) {
     `Pricing: ${pricing}`,
     "",
     `Project scope: ${scope}`,
+    "",
+    callSummary,
   ];
   if (requirements) lines.push(`Candidate/profile requirements: ${requirements}`);
   lines.push(`Next steps: ${nextSteps}`);

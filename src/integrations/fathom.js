@@ -52,6 +52,36 @@ function normalizeCompanyDomain(value) {
   return firstNonEmpty(value.domain, value.company_domain);
 }
 
+function extractSummaryText(...values) {
+  for (const value of values) {
+    if (!value) continue;
+    if (typeof value === "string" && cleanText(value)) return value;
+    if (Array.isArray(value)) {
+      const lines = value
+        .map((entry) => {
+          if (typeof entry === "string") return entry;
+          return firstNonEmpty(entry.text, entry.content, entry.title, entry.summary, entry.description);
+        })
+        .filter((entry) => cleanText(entry));
+      if (lines.length) return lines.join("\n");
+    }
+    if (typeof value === "object") {
+      const nested = extractSummaryText(
+        value.text,
+        value.content,
+        value.summary,
+        value.description,
+        value.body,
+        value.markdown,
+        value.items,
+        value.action_items
+      );
+      if (nested) return nested;
+    }
+  }
+  return "";
+}
+
 function parseFathomSharePage(html, sourceUrl = "") {
   const match = String(html || "").match(/<div[^>]+id=["']app["'][^>]+data-page="([^"]+)"/i);
   if (!match) return { url: sourceUrl };
@@ -69,7 +99,19 @@ function parseFathomSharePage(html, sourceUrl = "") {
       company: normalizeCompany(company),
       companyDomain: normalizeCompanyDomain(company),
       callDate: firstNonEmpty(call.started_at, call.recording?.started_at),
-      copyTranscriptUrl: props.copyTranscriptUrl || ""
+      copyTranscriptUrl: props.copyTranscriptUrl || "",
+      actionItemsUrl: props.clipboardActionItemsUrl || "",
+      summaryText: extractSummaryText(
+        props.summary,
+        props.templatedNote,
+        props.templated_note,
+        props.callSummary,
+        props.call_summary,
+        call.summary,
+        call.templatedNote,
+        call.templated_note,
+        call.note
+      )
     };
   } catch (_error) {
     return { url: sourceUrl };
@@ -86,6 +128,7 @@ function normalizeFathomPayload(payload) {
     company: firstNonEmpty(normalizeCompany(payload.company), normalizeCompany(recording.company)),
     companyDomain: firstNonEmpty(payload.company_domain, payload.companyDomain, normalizeCompanyDomain(payload.company), normalizeCompanyDomain(recording.company)),
     email: firstNonEmpty(payload.email, recording.email),
+    summaryText: extractSummaryText(payload.summary, payload.call_summary, payload.action_items, recording.summary, recording.action_items),
     transcriptText: firstRawNonEmpty(
       transcriptToText(payload.transcript),
       payload.transcript_text,
@@ -136,6 +179,7 @@ async function fetchFathomShareRecording(shareUrl) {
   const html = await pageResponse.text();
   const metadata = parseFathomSharePage(html, shareUrl);
   let transcriptText = "";
+  let summaryText = metadata.summaryText || "";
 
   if (metadata.copyTranscriptUrl) {
     const transcriptUrl = new URL(metadata.copyTranscriptUrl, shareUrl).toString();
@@ -151,7 +195,26 @@ async function fetchFathomShareRecording(shareUrl) {
     }
   }
 
-  return { ...metadata, transcriptText };
+  if (!summaryText && metadata.actionItemsUrl) {
+    const actionItemsUrl = new URL(metadata.actionItemsUrl, shareUrl).toString();
+    const actionItemsResponse = await fetch(actionItemsUrl, {
+      headers: {
+        Accept: "application/json",
+        Referer: shareUrl
+      }
+    });
+    if (actionItemsResponse.ok) {
+      const contentType = actionItemsResponse.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        const data = await actionItemsResponse.json();
+        summaryText = extractSummaryText(data.text, data.action_items, data.items, data.summary, data.html && htmlTranscriptToText(data.html));
+      } else {
+        summaryText = htmlTranscriptToText(await actionItemsResponse.text());
+      }
+    }
+  }
+
+  return { ...metadata, summaryText, transcriptText };
 }
 
 async function fetchFathomRecording(config, recordingIdOrUrl) {

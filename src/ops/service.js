@@ -14,7 +14,8 @@ function callExtractionText({ recording = {}, transcriptText = "", fallbackText 
     recording.title ? `Call title: ${recording.title}` : "",
     recording.company ? `Company: ${recording.company}` : "",
     recording.companyDomain ? `Company domain: ${recording.companyDomain}` : "",
-    recording.callDate ? `Call date: ${recording.callDate}` : ""
+    recording.callDate ? `Call date: ${recording.callDate}` : "",
+    recording.summaryText ? `Fathom summary:\n${recording.summaryText}` : ""
   ].filter(Boolean).join("\n");
   return [metadata, transcriptText || fallbackText].filter(Boolean).join("\n\nTranscript:\n");
 }

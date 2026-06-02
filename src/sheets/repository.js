@@ -19,6 +19,16 @@ function mergePreservingExisting(existing = {}, incoming = {}) {
   return merged;
 }
 
+function rowHasData(row = {}, headers = []) {
+  return headers.some((header) => cleanText(row[header]));
+}
+
+function firstEmptyRowNumber(table = {}, headers = []) {
+  const rows = table.rows || [];
+  const emptyRow = rows.find((row) => !rowHasData(row, headers));
+  return emptyRow ? emptyRow._rowNumber : rows.length + 2;
+}
+
 class Repository {
   constructor(sheetsClient) {
     this.sheets = sheetsClient;
@@ -57,8 +67,9 @@ class Repository {
       return { row: merged, created: false };
     }
 
-    await this.sheets.appendRow(sheetName, headers, merged);
-    return { row: merged, created: true };
+    const rowNumber = firstEmptyRowNumber(table, headers);
+    await this.sheets.updateRow(sheetName, headers, rowNumber, merged);
+    return { row: merged, created: true, rowNumber };
   }
 
   async updateRowByNumber(sheetName, rowNumber, row) {
@@ -100,4 +111,4 @@ class Repository {
   }
 }
 
-module.exports = { Repository, mergePreservingExisting };
+module.exports = { Repository, firstEmptyRowNumber, mergePreservingExisting, rowHasData };

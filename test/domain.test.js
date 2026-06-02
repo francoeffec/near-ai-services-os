@@ -6,7 +6,7 @@ const { generateHandoffMessage } = require("../src/domain/handoff");
 const { diagnose, syncWeeklyMetrics, weekStart } = require("../src/ops/metrics");
 const { OpsService } = require("../src/ops/service");
 const { htmlTranscriptToText, parseFathomSharePage, transcriptToText } = require("../src/integrations/fathom");
-const { mergePreservingExisting } = require("../src/sheets/repository");
+const { Repository, firstEmptyRowNumber, mergePreservingExisting } = require("../src/sheets/repository");
 const { handleIntent, inferCompanyFromThread } = require("../src/slack/app");
 const { isPositiveReply, normalizeSmartleadReply } = require("../src/integrations/smartlead");
 const { normalizeBooking } = require("../src/integrations/booking");
@@ -149,6 +149,39 @@ test("repository merge preserves existing non-empty values on partial updates", 
   assert.equal(cleared.Notes, "");
 });
 
+test("repository inserts new rows into first empty sheet row", async () => {
+  const updates = [];
+  const repository = new Repository({
+    async readTable() {
+      return {
+        headers: ["ID", "Entity Key", "Company", "Created At", "Updated At"],
+        rows: [
+          { _rowNumber: 2, ID: "id_1", "Entity Key": "a.com|", Company: "A" },
+          { _rowNumber: 3, ID: "id_2", "Entity Key": "b.com|", Company: "B" },
+          { _rowNumber: 4, ID: "", "Entity Key": "", Company: "", "Created At": "", "Updated At": "" },
+          { _rowNumber: 1600, ID: "id_3", "Entity Key": "clinow.com|", Company: "Clinow" }
+        ]
+      };
+    },
+    async updateRow(sheetName, headers, rowNumber, row) {
+      updates.push({ sheetName, headers, rowNumber, row });
+    }
+  });
+
+  const result = await repository.upsert("Custom", "Entity Key", "c.com|", { Company: "C" }, "ID", "id");
+  assert.equal(result.rowNumber, 4);
+  assert.equal(updates[0].rowNumber, 4);
+});
+
+test("firstEmptyRowNumber falls back to next row when no blanks exist", () => {
+  assert.equal(firstEmptyRowNumber({
+    rows: [
+      { _rowNumber: 2, Company: "A" },
+      { _rowNumber: 3, Company: "B" }
+    ]
+  }, ["Company"]), 4);
+});
+
 test("createDeal honors existing sheet Deal Stage field", async () => {
   const upserts = [];
   const repository = {
@@ -272,6 +305,13 @@ test("updateDealFromCall creates a deal and lead when a Fathom call has no exist
   assert.equal(result.row["Fathom URL"], "https://fathom.video/share/abc");
   assert.match(result.row["Skills Needed"], /n8n/);
   assert.match(result.row.Pricing, /70/);
+  assert.match(result.row.Notes, /Need:/);
+  assert.match(result.row.Notes, /Pain points:/);
+  assert.match(result.row.Notes, /Pricing:/);
+  assert.match(result.row.Notes, /Scope of project:/);
+  assert.match(result.row.Notes, /Skills needed:/);
+  assert.ok(result.row.Notes.length < 1200);
+  assert.doesNotMatch(result.row.Notes, /Extra transcript context Extra transcript context/);
   assert.equal(upserts[0].sheetName, "Deals");
   assert.equal(upserts[1].sheetName, "Leads");
   assert.equal(upserts[1].row["Lead Stage"], "Call Booked");
@@ -291,6 +331,22 @@ test("Fathom Slack replies recap deal, lead, and filled fields", async () => {
             "Fathom URL": "https://fathom.video/share/abc",
             Pricing: "$70/hr",
             "Skills Needed": "n8n, Airtable",
+            Notes: [
+              "Need:",
+              "- Automate customer-facing workflows.",
+              "",
+              "Pain points:",
+              "- Current process is manual.",
+              "",
+              "Pricing:",
+              "- $70/hr",
+              "",
+              "Scope of project:",
+              "- Build n8n and Airtable automations.",
+              "",
+              "Skills needed:",
+              "- n8n, Airtable"
+            ].join("\n"),
             "Next Steps": "Send recap"
           }
         };
@@ -298,10 +354,11 @@ test("Fathom Slack replies recap deal, lead, and filled fields", async () => {
     }
   });
 
-  assert.equal(
-    text,
-    "Fathom update for Pisteyo: updated the deal and created the lead. Filled/confirmed: Fathom URL, pricing, skills needed, next steps."
-  );
+  assert.match(text, /Fathom update for Pisteyo: updated the deal and created the lead/);
+  assert.match(text, /\*Need\*\n- Automate customer-facing workflows/);
+  assert.match(text, /\*Pain points\*\n- Current process is manual/);
+  assert.match(text, /\*Pricing\*\n- \$70\/hr/);
+  assert.ok(text.length < 1200);
 });
 
 test("inferCompanyFromThread finds company in prior Slack context", async () => {

@@ -1,5 +1,6 @@
 const { parseIntent } = require("../domain/intent");
 const { cleanText } = require("../domain/normalize");
+const { formatSlackCallSummary } = require("../domain/call-summary");
 
 async function fetchTextFile(file, botToken) {
   if (!file?.url_private || !botToken) return "";
@@ -94,7 +95,11 @@ function fathomUpdateText(result) {
   const leadAction = result.leadResult ? actionWord(result.leadResult) : "synced";
   const fieldLabels = readableFieldList(result.row).slice(0, 6);
   const fieldText = fieldLabels.length ? ` Filled/confirmed: ${fieldLabels.join(", ")}.` : "";
-  return `Fathom update for ${company}: ${dealAction} the deal and ${leadAction} the lead.${fieldText}`;
+  return [
+    `Fathom update for ${company}: ${dealAction} the deal and ${leadAction} the lead.${fieldText}`,
+    "",
+    formatSlackCallSummary(result.row)
+  ].join("\n");
 }
 
 async function handleIntent({ intent, opsService }) {

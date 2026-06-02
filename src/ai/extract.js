@@ -1,4 +1,5 @@
 const { cleanText } = require("../domain/normalize");
+const { compactField, formatCallSummary } = require("../domain/call-summary");
 
 async function extractCallFieldsWithOpenAI(config, transcriptText) {
   if (!config.ai?.apiKey) return {};
@@ -15,6 +16,8 @@ async function extractCallFieldsWithOpenAI(config, transcriptText) {
       pricing: { type: "string" },
       hours_per_week: { type: "string" },
       engineer_type: { type: "string" },
+      need: { type: "string" },
+      pain_points: { type: "string" },
       skills_needed: { type: "string" },
       project_scope: { type: "string" },
       start_date: { type: "string" },
@@ -31,6 +34,8 @@ async function extractCallFieldsWithOpenAI(config, transcriptText) {
       "pricing",
       "hours_per_week",
       "engineer_type",
+      "need",
+      "pain_points",
       "skills_needed",
       "project_scope",
       "start_date",
@@ -59,7 +64,15 @@ async function extractCallFieldsWithOpenAI(config, transcriptText) {
       messages: [
         {
           role: "system",
-          content: "Extract NearAI Services deal fields from a sales call transcript. The company and contact should be the external prospect, not Near. Use deal_stage only from: Cancelled, Call Booked, Unqualified, Considering, Input Call, Contract Signed, Lost, Future Need. Use empty strings when the transcript does not support a field. Do not invent facts."
+          content: [
+            "Extract NearAI Services deal fields from a sales call transcript or Fathom summary.",
+            "The company and contact should be the external prospect, not Near.",
+            "Prefer a Fathom summary/action-items section when present; use the transcript only to fill gaps.",
+            "Use deal_stage only from: Cancelled, Call Booked, Unqualified, Considering, Input Call, Contract Signed, Lost, Future Need.",
+            "Keep need, pain_points, project_scope, skills_needed, pricing, next_steps, and notes concise. Do not paste transcript lines.",
+            "notes must be a human-readable TL;DR under 1200 characters with only these sections: Need, Pain points, Pricing, Scope of project, Skills needed. Use short bullets.",
+            "Use empty strings when the call does not support a field. Do not invent facts."
+          ].join(" ")
         },
         {
           role: "user",
@@ -140,6 +153,30 @@ function collectSkills(body) {
     .join(", ");
 }
 
+function matchingLines(raw, pattern, max = 2) {
+  return String(raw || "")
+    .split(/\n+/)
+    .map((line) => cleanText(line.replace(/^[^:\n]{1,40}:\s*/, "")))
+    .filter((line) => pattern.test(line))
+    .slice(0, max)
+    .join(" ");
+}
+
+function normalizeCallFields(fields = {}) {
+  const normalized = {
+    ...fields,
+    need: compactField(fields.need || fields.project_scope, 2, 420),
+    pain_points: compactField(fields.pain_points, 2, 420),
+    pricing: compactField(fields.pricing, 1, 220),
+    skills_needed: compactField(fields.skills_needed, 3, 420),
+    project_scope: compactField(fields.project_scope, 2, 520),
+    next_steps: compactField(fields.next_steps, 2, 420),
+    if_lost_reason: compactField(fields.if_lost_reason, 1, 220)
+  };
+  normalized.notes = formatCallSummary(normalized);
+  return normalized;
+}
+
 function heuristicCallExtraction(text) {
   const raw = String(text || "");
   const body = cleanText(raw);
@@ -168,11 +205,13 @@ function heuristicCallExtraction(text) {
     pricing,
     hours_per_week: hours,
     engineer_type: skills ? "AI Automation Engineer" : "",
+    need: matchingLines(raw, /\b(need|looking for|want|interested|support|help)\b/i, 2),
+    pain_points: matchingLines(raw, /\b(pain|manual|problem|issue|challenge|bottleneck|hard|difficult|slow)\b/i, 2),
     skills_needed: skills,
-    project_scope: body.slice(0, 1200),
+    project_scope: matchingLines(raw, /\b(automate|automation|workflow|build|integrat|report|dashboard|agent|api|n8n|airtable|supabase|mcp)\b/i, 3),
     start_date: startDate,
-    next_steps: "",
-    notes: body.slice(0, 2000),
+    next_steps: matchingLines(raw, /\b(next step|send|schedule|follow up|follow-up|intro|proposal|recap)\b/i, 2),
+    notes: "",
     if_lost_reason: ""
   };
 }
@@ -180,11 +219,11 @@ function heuristicCallExtraction(text) {
 async function extractCallFields(config, transcriptText) {
   try {
     const ai = await extractCallFieldsWithOpenAI(config, transcriptText);
-    if (Object.keys(ai).length > 0) return ai;
+    if (Object.keys(ai).length > 0) return normalizeCallFields(ai);
   } catch (error) {
     console.warn("OpenAI extraction failed; using heuristic extraction", error.message);
   }
-  return heuristicCallExtraction(transcriptText);
+  return normalizeCallFields(heuristicCallExtraction(transcriptText));
 }
 
-module.exports = { extractCallFields, heuristicCallExtraction };
+module.exports = { extractCallFields, heuristicCallExtraction, normalizeCallFields };
