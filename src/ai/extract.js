@@ -13,6 +13,20 @@ const DEAL_STAGES = new Set([
 ]);
 
 const NEAR_SPEAKER_PATTERN = /\b(near|camila|cami|franco|hayden|kevin|codex|iphone)\b/i;
+const COMMON_FIRST_NAMES = [
+  "eduardo",
+  "dionelis",
+  "zach",
+  "max",
+  "bob",
+  "derek",
+  "erik",
+  "thomas",
+  "mike",
+  "anthony",
+  "robert",
+  "chad"
+];
 
 async function extractCallFieldsWithOpenAI(config, transcriptText) {
   if (!config.ai?.apiKey) return {};
@@ -149,13 +163,15 @@ function extractContactName(body) {
   }
   const turns = parseTranscriptTurns(body);
   const external = turns.find((turn) => !isNearSpeaker(turn.speaker));
-  if (external?.speaker) return titleCaseName(external.speaker);
+  if (external?.speaker) return titleCaseName(splitConcatenatedName(external.speaker));
   return "";
 }
 
 function collectSkills(body) {
   const skills = [
     ["n8n", /\bn8n\b|\b8n\b/i],
+    ["Make", /\bmake\.com\b|\bmake\b(?=\s*(?:,|\/|y\b|o\b|and\b|de\b))/i],
+    ["Zapier", /\bzapier\b/i],
     ["Airtable", /\bairtable\b/i],
     ["Supabase", /\bsupabase\b/i],
     ["APIs", /\bapi\b|\bapis\b/i],
@@ -173,6 +189,15 @@ function collectSkills(body) {
     .filter(([, pattern]) => pattern.test(body))
     .map(([label]) => label)
     .join(", ");
+}
+
+function splitConcatenatedName(value) {
+  const cleaned = cleanText(value);
+  if (!/^[a-z]+$/i.test(cleaned)) return cleaned;
+  const lower = cleaned.toLowerCase();
+  const firstName = COMMON_FIRST_NAMES.find((name) => lower.startsWith(name) && lower.length > name.length + 2);
+  if (!firstName) return cleaned;
+  return `${firstName} ${lower.slice(firstName.length)}`;
 }
 
 function titleCaseName(value) {
@@ -254,6 +279,12 @@ function canonicalQuestion(question) {
   const text = cleanText(question).replace(/\s*\?+\s*$/g, "");
   const lower = text.toLowerCase();
   if (!text) return "";
+  if (/qu[eé] seguir[ií]a|siguiente paso|si yo decidiera|c[oó]mo funciona esa parte/.test(lower)) return "What would the next step be if Pisteyo decides to move forward?";
+  if (/empleados.*(?:freelance|pool)|pool.*freelance|son empleados/.test(lower)) return "Are the engineers Near employees or freelancers?";
+  if (/way of working|modelo.*(?:c[oó]mo|funciona)|c[oó]mo es.*modelo|c[oó]mo funciona|staff augmentation|recursos humanos tecnológicos/.test(lower)) return "How does Near's working model and engagement process work?";
+  if (/machine learning|ingenieros de machine|construyan en data/.test(lower)) return "Does this require machine-learning engineers or AI automation builders?";
+  if (/mercado libre|500.*(?:d[oó]lares|hora)|costosos|tarifas/.test(lower)) return "How does Near's model compare on cost versus expensive AI/ML talent?";
+  if (/equipos.*(?:argentina|dónde)|dónde.*equipos|colombia tienen|están en argentina/.test(lower)) return "Where are Near's engineering teams located?";
   if (/all[-\s]?in cost|cost[-\s]?in cost|\bcost\b/.test(lower)) return "What is the all-in hourly cost?";
   if (/how much.*full[-\s]?time|full[-\s]?time.*employees|rough numbers|ballpark/.test(lower)) return "What does full-time AI engineer compensation look like?";
   if (/do you hire full[-\s]?time|full[-\s]?time also/.test(lower)) return "Can Near also help hire a full-time AI engineer?";
@@ -263,6 +294,7 @@ function canonicalQuestion(question) {
   if (/do you do all kinds|accounting|admin|it\b/.test(lower)) return "Do you support roles beyond AI, such as accounting, admin, IT, and operations?";
   if (/how.*use ai|best way/.test(lower)) return "How should the company use AI in the highest-leverage way?";
   if (/what.*offer|fractional/.test(lower)) return "How does the fractional AI engineer model work?";
+  if (text.length > 180) return "";
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}?`;
 }
 
@@ -280,6 +312,11 @@ function keyQuestionsFromTurns(turns) {
     }
   }
   const priority = [
+    /Near employees or freelancers/i,
+    /working model and engagement process/i,
+    /next step.*Pisteyo/i,
+    /machine-learning engineers/i,
+    /cost versus expensive/i,
     /all-in hourly cost/i,
     /full-time ai engineer compensation/i,
     /help hire a full-time ai engineer/i,
@@ -289,7 +326,7 @@ function keyQuestionsFromTurns(turns) {
     /fractional ai engineer model/i,
     /roles beyond ai/i
   ];
-  const cleaned = questions.filter((question) => question && !/where are you calling from|what caught|how do you find your people|work with hr/i.test(question));
+  const cleaned = questions.filter((question) => question && !/where are you calling from|what caught|how do you find your people|work with hr|fathom/i.test(question));
   const ranked = [...new Set(cleaned)].sort((a, b) => {
     const rank = (value) => {
       const index = priority.findIndex((pattern) => pattern.test(value));
@@ -325,6 +362,12 @@ function extractNeedPoints(body) {
   if (/fractional (?:ai )?(?:person|engineer)|fractional ai|package of hours/i.test(body)) {
     points.push("Exploring fractional AI engineering support and how the model works.");
   }
+  if (/no nos alcanzan las manos|necesitamos para colombia|necesitando muchos proyectos|capacidad de desarrollo/i.test(body)) {
+    points.push("Needs flexible AI automation/development capacity for client projects in Colombia and Latin America.");
+  }
+  if (/cotizar|sacar costos|pasar propuestas|propuesta de tiempos y costos|discovery|discoveries/i.test(body)) {
+    points.push("Wants support estimating and scoping AI projects that come out of discovery or roadmap work.");
+  }
   if (/full[-\s]?time (?:permanent )?(?:ai )?engineer|hire full[-\s]?time/i.test(body)) {
     points.push("Also considering whether a full-time AI engineer or AI architect makes sense.");
   }
@@ -345,6 +388,15 @@ function extractPainPoints(body) {
   if (/hiring.*fort wayne.*taking longer|taking longer than i thought|trying to hire.*taking longer/i.test(body)) {
     points.push("Local hiring in Fort Wayne is taking longer than expected.");
   }
+  if (/no nos alcanzan las manos|no ha sido fácil conseguir|cada vez tiene menos tiempo|no estamos teniendo suficiente gente/i.test(body)) {
+    points.push("Internal development capacity is constrained and good AI automation talent is hard to find.");
+  }
+  if (/costosos|vale más|tarifas|salarios|prefiero tener los míos en india/i.test(body)) {
+    points.push("Strong AI talent can be expensive, so delivery cost and rate fit matter.");
+  }
+  if (/mercado.*(?:tocando el agua|empezando)|gente está entendiendo|aprendiendo|quick wins|pruebas de concepto/i.test(body)) {
+    points.push("Clients are still learning AI, so quick wins and proofs of concept are easier to sell than long builds.");
+  }
   if (/trying to figure out.*things|how to use ai in the best way|what we want to use it/i.test(body)) {
     points.push("They are still clarifying which AI use cases should be prioritized.");
   }
@@ -362,6 +414,12 @@ function extractScopePoints(body) {
   if (/input call with an engineer|meet the engineer|walk them through/i.test(body)) {
     points.push("Run an engineer input call to define one priority workflow or bottleneck and estimate hours.");
   }
+  if (/discovery|discoveries|levantar.*casos de uso|roadmaps?|propuesta de tiempos y costos/i.test(body)) {
+    points.push("Support Pisteyo across discovery, solution design, cost estimates, and implementation for client AI projects.");
+  }
+  if (/quick wins|pruebas de concepto|rápidos de implementar|airtable|supabase|n8n|zapier|make\.com|\bmake\b(?=\s*(?:,|\/|y\b|o\b|and\b|de\b))/i.test(body)) {
+    points.push("Build quick AI automation proofs of concept using tools like n8n, Make, Zapier, Airtable, Supabase, APIs, and agents.");
+  }
   if (/ai agents|integrating your crms|different tools|repetitive processes|centralized information/i.test(body)) {
     points.push("Potential builds include AI agents, CRM/tool integrations, centralized information access, and workflow automation.");
   }
@@ -373,10 +431,15 @@ function extractScopePoints(body) {
 
 function extractNextSteps(body) {
   const points = [];
-  if (/send (?:you )?(?:all )?(?:the )?information|send.*different models|send profiles|send.*examples/i.test(body)) {
+  if (/send (?:you )?(?:all )?(?:the )?information|send.*different models|send profiles|send.*examples|enviamos todo|enviar.*(?:presentación|resumen|algo)|cuente quiénes son ustedes|te enviamos eso/i.test(body)) {
     points.push("Near to send information on fractional and full-time options, plus example profiles or relevant examples.");
   }
-  if (/calendar link/i.test(body)) {
+  if (/socio.*(?:operaciones|producción|project management)|(?:operaciones|producción|project management).*socio|partner.*(?:operations|production)|hablar con él/i.test(body)) {
+    points.push("Prospect to share Near's information with their operations/production partner and align internally.");
+  }
+  if (/whatsapp|coordinar esa llamada|siguiente llamada|la semana que viene|otra semana/i.test(body)) {
+    points.push("Near to coordinate the next call by WhatsApp or calendar, ideally including the prospect's partner.");
+  } else if (/calendar link|calendario/i.test(body)) {
     points.push("Near to include a calendar link so the prospect can reconnect if useful.");
   }
   if (/let me look|take a look|i'll decide|decide/i.test(body)) {
@@ -396,7 +459,7 @@ function extractDealStage(body, fallback = "") {
   if (/\b(input call booked|input call scheduled|engineer input call scheduled)\b/i.test(body)) return "Input Call";
   if (/\b(call booked|meeting booked|calendar invite|scheduled for)\b/i.test(body)) return "Call Booked";
   if (/\b(future need|second half|later this year|not now)\b/i.test(body)) return "Future Need";
-  if (/\b(interested|send me|send information|take a look|review|decide|fractional|full-time|ai engineer)\b/i.test(body)) return "Considering";
+  if (/\b(interested|send me|send information|take a look|review|decide|fractional|full-time|ai engineer|interes|interesa|me gustaria|miramos si podemos|siguiente llamada|cotizar|propuestas?)\b/i.test(body)) return "Considering";
   return DEAL_STAGES.has(fallback) ? fallback : "";
 }
 
