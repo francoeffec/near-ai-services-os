@@ -330,7 +330,8 @@ test("updateDealFromCall clears stale call-date start dates when no start date w
     "Company Domain": "clinow.com",
     "Deal Stage": "Considering",
     "Call Had Date": "2026-06-01T20:30:00.000Z",
-    "Start Date": "2026-06-01T07:00:00.000Z"
+    "Start Date": "2026-06-01T07:00:00.000Z",
+    "Handoff Status": "Posted"
   };
   const upserts = [];
   const repository = {
@@ -374,7 +375,8 @@ test("updateDealFromCall clears stale call-date start dates when no start date w
   });
 
   assert.equal(result.row["Start Date"], "");
-  assert.deepEqual(upserts.find((upsert) => upsert.sheetName === "Deals").row.__clear, ["Start Date"]);
+  assert.equal(result.row["Handoff Status"], "");
+  assert.deepEqual(upserts.find((upsert) => upsert.sheetName === "Deals").row.__clear, ["Start Date", "Handoff Status"]);
 });
 
 test("call extraction turns Clinow-style transcript into sales-ready fields", async () => {
