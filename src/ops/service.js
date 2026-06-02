@@ -40,6 +40,14 @@ function acquisitionSource(...values) {
   return "";
 }
 
+function sameCalendarDate(left, right) {
+  if (!left || !right) return false;
+  const leftDate = new Date(left);
+  const rightDate = new Date(right);
+  if (Number.isNaN(leftDate.getTime()) || Number.isNaN(rightDate.getTime())) return false;
+  return leftDate.toISOString().slice(0, 10) === rightDate.toISOString().slice(0, 10);
+}
+
 class OpsService {
   constructor({ repository, slackClient, config }) {
     this.repository = repository;
@@ -136,7 +144,8 @@ class OpsService {
       "If Lost Reason": input.ifLostReason || input["If Lost Reason"] || base["If Lost Reason"] || "",
       "Next Steps": input.nextSteps || input["Next Steps"] || base["Next Steps"] || "",
       Notes: input.notes || input.Notes || base.Notes || "",
-      "Handoff Status": input.handoffStatus || base["Handoff Status"] || ""
+      "Handoff Status": input.handoffStatus || base["Handoff Status"] || "",
+      __clear: input.__clear || []
     };
 
     const result = await this.repository.upsert(SHEETS.deals, "Entity Key", key, row, "Deal ID", "deal");
@@ -217,6 +226,11 @@ class OpsService {
     }
 
     const base = deal || {};
+    const callDate = firstNonEmpty(input.callDate, recording.callDate, base["Call Had Date"], base["Call Date"]);
+    const clearFields = [];
+    if (!cleanText(extracted.start_date) && sameCalendarDate(base["Start Date"], callDate)) {
+      clearFields.push("Start Date");
+    }
 
     const updated = await this.createDeal({
       ...base,
@@ -227,7 +241,7 @@ class OpsService {
       email: firstNonEmpty(identity.email, base.Email),
       source: firstNonEmpty(base.Source, input.source),
       stage: firstNonEmpty(extracted.deal_stage, input.stage, base["Deal Stage"], "Call Booked"),
-      callDate: firstNonEmpty(input.callDate, recording.callDate, base["Call Had Date"], base["Call Date"]),
+      callDate,
       fathomUrl: firstNonEmpty(input.fathomUrl, recording.url, base["Fathom URL"]),
       pricing: firstNonEmpty(extracted.pricing, base.Pricing),
       hoursPerWeek: firstNonEmpty(extracted.hours_per_week, base["Hours/Week"]),
@@ -239,13 +253,14 @@ class OpsService {
       nextSteps: firstNonEmpty(extracted.next_steps, base["Next Steps"]),
       notes: firstNonEmpty(extracted.notes, base.Notes),
       slackThread: firstNonEmpty(input.slackThread, base["Slack Thread"]),
-      sourceEventId: firstNonEmpty(input.sourceEventId, recording.sourceEventId)
+      sourceEventId: firstNonEmpty(input.sourceEventId, recording.sourceEventId),
+      __clear: clearFields
     });
 
     if (["Input Call", "Contract Signed"].includes(updated.row["Deal Stage"])) {
       await this.moveToHandoff(updated.row);
     }
-    return updated;
+    return { ...updated, callSummary: extracted };
   }
 
   async moveToHandoff(input) {
