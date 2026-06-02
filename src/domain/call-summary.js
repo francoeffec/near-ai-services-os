@@ -3,9 +3,11 @@ const { cleanText, firstNonEmpty } = require("./normalize");
 const SUMMARY_SECTIONS = [
   { label: "Need", keys: ["need", "Need"] },
   { label: "Pain points", keys: ["pain_points", "Pain Points", "Pain points"] },
+  { label: "Key questions asked", keys: ["key_questions", "Key Questions", "Key questions asked"] },
   { label: "Pricing", keys: ["pricing", "Pricing"] },
   { label: "Scope of project", keys: ["project_scope", "Project Scope", "Project Description"] },
-  { label: "Skills needed", keys: ["skills_needed", "Skills Needed"] }
+  { label: "Skills needed", keys: ["skills_needed", "Skills Needed"] },
+  { label: "Next steps", keys: ["next_steps", "Next Steps", "Next Step"] }
 ];
 
 function shorten(value, maxLength = 220) {
@@ -63,7 +65,7 @@ function callSummarySections(input = {}) {
       ? firstNonEmpty(input.project_scope, input["Project Scope"])
       : "";
     const value = firstNonEmpty(firstValue(input, section), fallback);
-    const maxItems = section.label === "Skills needed" ? 3 : 2;
+    const maxItems = ["Skills needed", "Key questions asked"].includes(section.label) ? 3 : 2;
     const points = splitPoints(value, maxItems);
     return {
       label: section.label,
