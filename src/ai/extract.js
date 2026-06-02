@@ -493,8 +493,23 @@ function safeField(value, { allowLong = false, nextStep = false } = {}) {
   if (isWeakValue(text)) return "";
   if (hasTranscriptLeak(text)) return "";
   if (!allowLong && text.length > 700) return "";
-  if (nextStep && /\b(they would suggest|would suggest how|suggest an amount|if you agree|if you're ready|work product|next steps? (?:are|is) unclear)\b/i.test(text)) return "";
+  if (nextStep && isWeakNextStep(text)) return "";
   return text;
+}
+
+function isWeakNextStep(value) {
+  const text = cleanText(value);
+  if (!text) return true;
+  if (/\b(they would suggest|would suggest how|suggest an amount|if you agree|if you're ready|work product|next steps? (?:are|is) unclear)\b/i.test(text)) {
+    return true;
+  }
+  if (/\b(?:continue|touch base|circle back|follow up|keep in touch|discuss further)\b/i.test(text)
+    && !/\b(?:Near|Franco|Camila|Cami|prospect|client|customer|company|lead)\b/i.test(text)) {
+    return true;
+  }
+  if (/^(?:next steps?|follow[-\s]?up|action items?):?\s*$/i.test(text)) return true;
+  if (/^(?:follow up|schedule a follow[-\s]?up|continue the conversation)\.?$/i.test(text)) return true;
+  return false;
 }
 
 function chooseField(primary, fallback, options) {
