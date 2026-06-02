@@ -114,6 +114,7 @@ test("clarification replies complete the original thread intent", () => {
   assert.equal(intent.company, "Example");
   assert.equal(intent.email, "jane@example.com");
   assert.equal(intent.nextSteps, "Franco should follow up next Friday");
+  assert.doesNotMatch(intent.notes, /\s+\./);
 });
 
 test("broad Slack message handler can skip direct bot mentions", () => {
