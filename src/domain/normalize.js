@@ -60,7 +60,7 @@ function nowIso() {
 }
 
 function sheetDate(date = new Date(), timeZone = "America/Argentina/Buenos_Aires") {
-  const value = date instanceof Date ? date : new Date(date);
+  const value = date instanceof Date ? date : parseDateOnlyAtNoonUtc(date);
   if (Number.isNaN(value.getTime())) return "";
   return new Intl.DateTimeFormat("en-US", {
     timeZone,
@@ -68,6 +68,24 @@ function sheetDate(date = new Date(), timeZone = "America/Argentina/Buenos_Aires
     day: "numeric",
     year: "numeric"
   }).format(value);
+}
+
+function parseDateOnlyAtNoonUtc(value) {
+  const text = cleanText(value);
+  const isoMatch = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch.map(Number);
+    return new Date(Date.UTC(year, month - 1, day, 12));
+  }
+
+  const monthMatch = text.match(/^(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+(\d{1,2})(?:,?\s+(\d{4}))$/i);
+  if (monthMatch) {
+    const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+    const month = monthNames.indexOf(monthMatch[1].slice(0, 3).toLowerCase());
+    return new Date(Date.UTC(Number(monthMatch[3]), month, Number(monthMatch[2]), 12));
+  }
+
+  return new Date(value);
 }
 
 function sheetDateTime(date = new Date(), timeZone = "America/Argentina/Buenos_Aires") {
