@@ -11,7 +11,7 @@ const { handleIntent, inferCompanyFromThread } = require("../src/slack/app");
 const { isPositiveReply, normalizeSmartleadReply } = require("../src/integrations/smartlead");
 const { normalizeBooking } = require("../src/integrations/booking");
 const { normalizeFathomPayload } = require("../src/integrations/fathom");
-const { loadConfig, validateConfig } = require("../src/config");
+const { extractionStatus, loadConfig, validateConfig } = require("../src/config");
 const { shouldRunMetrics } = require("../src/jobs/scheduler");
 const { buildValidationRequests } = require("../src/sheets/bootstrap");
 const { extractCallFields, normalizeCallFields } = require("../src/ai/extract");
@@ -949,6 +949,27 @@ test("environment validator accepts Apps Script sheet proxy", () => {
     smartlead: { ...config.smartlead, apiKey: "smartlead" }
   }, { requireIntegrations: true });
   assert.equal(result.ok, true);
+});
+
+test("extraction status reports degraded and robust modes without exposing secrets", () => {
+  const degraded = extractionStatus({
+    ai: { apiKey: "" },
+    fathom: { apiKey: "" }
+  });
+  assert.equal(degraded.mode, "transcript_rules_only");
+  assert.equal(degraded.robust, false);
+  assert.equal(degraded.openaiConfigured, false);
+  assert.equal(degraded.fathomApiConfigured, false);
+  assert.match(degraded.warnings.join(" "), /OPENAI_API_KEY/);
+  assert.match(degraded.warnings.join(" "), /FATHOM_API_KEY/);
+
+  const robust = extractionStatus({
+    ai: { apiKey: "openai-key" },
+    fathom: { apiKey: "fathom-key" }
+  });
+  assert.equal(robust.mode, "fathom_summary_plus_ai");
+  assert.equal(robust.robust, true);
+  assert.deepEqual(robust.warnings, []);
 });
 
 test("scheduler runs weekly metrics once on configured Monday window", () => {
