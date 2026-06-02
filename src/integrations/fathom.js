@@ -130,6 +130,7 @@ function normalizeFathomPayload(payload) {
     company: firstNonEmpty(normalizeCompany(payload.company), normalizeCompany(recording.company)),
     companyDomain: firstNonEmpty(payload.company_domain, payload.companyDomain, normalizeCompanyDomain(payload.company), normalizeCompanyDomain(recording.company)),
     email: firstNonEmpty(payload.email, recording.email),
+    callDate: firstNonEmpty(payload.call_date, payload.callDate, recording.call_date, recording.started_at, recording.recording?.started_at),
     summaryText: extractSummaryText(
       payload.summary,
       payload.default_summary,
