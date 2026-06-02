@@ -227,9 +227,13 @@ class OpsService {
 
     const base = deal || {};
     const callDate = firstNonEmpty(input.callDate, recording.callDate, base["Call Had Date"], base["Call Date"]);
+    const stage = firstNonEmpty(extracted.deal_stage, input.stage, base["Deal Stage"], "Call Booked");
     const clearFields = [];
     if (!cleanText(extracted.start_date) && sameCalendarDate(base["Start Date"], callDate)) {
       clearFields.push("Start Date");
+    }
+    if (cleanText(base["Handoff Status"]) && !["Input Call", "Contract Signed"].includes(stage)) {
+      clearFields.push("Handoff Status");
     }
 
     const updated = await this.createDeal({
@@ -240,7 +244,7 @@ class OpsService {
       lastName: firstNonEmpty(input.lastName, base["Last Name"], contact.lastName),
       email: firstNonEmpty(identity.email, base.Email),
       source: firstNonEmpty(base.Source, input.source),
-      stage: firstNonEmpty(extracted.deal_stage, input.stage, base["Deal Stage"], "Call Booked"),
+      stage,
       callDate,
       fathomUrl: firstNonEmpty(input.fathomUrl, recording.url, base["Fathom URL"]),
       pricing: firstNonEmpty(extracted.pricing, base.Pricing),
