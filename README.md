@@ -140,3 +140,9 @@ Post-deploy smoke test:
 ```bash
 node scripts/smoke-deploy.js https://YOUR_HOST
 ```
+
+Production Fathom extraction smoke test:
+
+```bash
+node scripts/smoke-deploy.js https://YOUR_HOST --require-robust-extraction
+```
