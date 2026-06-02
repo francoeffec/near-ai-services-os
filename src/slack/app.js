@@ -89,6 +89,75 @@ function readableFieldList(row) {
     .map(([, label]) => label);
 }
 
+function isLeadingUserMention(text) {
+  return /^\s*<@[^>]+>/.test(String(text || ""));
+}
+
+function hasContact(intent) {
+  return Boolean(cleanText(intent.email) || cleanText(intent.firstName) || cleanText(intent.lastName));
+}
+
+function nextStepValue(intent) {
+  return cleanText(intent.nextSteps || intent.nextStep || intent["Next Steps"] || intent["Next Step"]);
+}
+
+function clarificationQuestion(intent) {
+  if (intent.type !== "create_deal" && intent.type !== "add_lead") return "";
+  if (!cleanText(intent.company)) return "What's the company name?";
+  if (!hasContact(intent)) return "Who's the main contact?";
+  if (!cleanText(intent.source)) return "What's the source? Use Outreach, Customer, Referral, or Girdley Media.";
+  if (!nextStepValue(intent)) return "What's the next step?";
+  return "";
+}
+
+function clarificationText(question) {
+  return `Before I update the tracker, I need one thing: ${question}`;
+}
+
+function clarificationFieldFromQuestion(text) {
+  const value = cleanText(text);
+  if (/company name/i.test(value)) return "company";
+  if (/main contact/i.test(value)) return "contact";
+  if (/\bsource\b/i.test(value)) return "source";
+  if (/next step/i.test(value)) return "nextStep";
+  return "";
+}
+
+function answerAsInstruction(field, answer) {
+  const value = cleanText(answer);
+  if (!field || !value) return "";
+  if (field === "company") return `Company is ${value}.`;
+  if (field === "contact") return `Contact is ${value}.`;
+  if (field === "source") return `Source is ${value}.`;
+  if (field === "nextStep") return `The next step is ${value}.`;
+  return "";
+}
+
+function buildClarifiedIntent(messages = [], replyText = "") {
+  const questionMessage = messages.slice().reverse().find((message) => /Before I update the tracker/i.test(message.text || ""));
+  if (!questionMessage) return null;
+  const field = clarificationFieldFromQuestion(questionMessage.text || "");
+  const instruction = answerAsInstruction(field, replyText);
+  if (!instruction) return null;
+  const originalMessage = messages.find((message) => cleanText(message.text) && !/Before I update the tracker/i.test(message.text || ""));
+  if (!originalMessage) return null;
+  return parseIntent(`${originalMessage.text}\n${instruction}`);
+}
+
+async function intentFromClarificationThread({ client, channel, threadTs, replyText }) {
+  if (!client || !channel || !threadTs || !replyText) return null;
+  try {
+    const response = await client.conversations.replies({
+      channel,
+      ts: threadTs,
+      limit: 30
+    });
+    return buildClarifiedIntent(response.messages || [], replyText);
+  } catch (_error) {
+    return null;
+  }
+}
+
 function fathomUpdateText(result) {
   const company = result.row.Company || result.row["Entity Key"] || "the company";
   const dealAction = actionWord(result);
@@ -105,11 +174,15 @@ function fathomUpdateText(result) {
 async function handleIntent({ intent, opsService }) {
   switch (intent.type) {
     case "add_lead": {
+      const question = clarificationQuestion(intent);
+      if (question) return clarificationText(question);
       if (!intent.company) throw new Error("Please include the company name for the lead.");
       const result = await opsService.addLead(intent);
       return `${result.created ? "Created" : "Updated"} lead: ${result.row.Company || result.row["Entity Key"]}`;
     }
     case "create_deal": {
+      const question = clarificationQuestion(intent);
+      if (question) return clarificationText(question);
       if (!intent.company) throw new Error("Please include the company name for the deal.");
       const result = await opsService.createDeal(intent);
       return `${result.created ? "Created" : "Updated"} deal: ${result.row.Company || result.row["Entity Key"]}`;
@@ -179,9 +252,9 @@ function createSlackApp({ config, opsService }) {
     intent.slackThread = `slack://${event.channel}/${event.ts}`;
     try {
       const text = await handleIntent({ intent, opsService });
-      await say({ text, thread_ts: event.ts });
+      await say({ text, thread_ts: event.thread_ts || event.ts });
     } catch (error) {
-      await say({ text: `I could not complete that: ${error.message}`, thread_ts: event.ts });
+      await say({ text: `I could not complete that: ${error.message}`, thread_ts: event.thread_ts || event.ts });
     }
   });
 
@@ -189,28 +262,48 @@ function createSlackApp({ config, opsService }) {
     if ((!message.text && !(message.files || []).length) || message.subtype || !allowed(config, { user: message.user, channel: message.channel })) return;
     const attachedText = await collectAttachedText(message.files || [], config.slack.botToken);
     const combinedText = [message.text, attachedText].filter(Boolean).join("\n\nAttached transcript:\n");
-    if (!/(add|create|update|move|assign|handoff|fathom|transcript|positive reply|interested)/i.test(combinedText)) return;
-    const intent = parseIntent(combinedText);
+    if (isLeadingUserMention(combinedText)) return;
+    const threadTs = message.thread_ts || message.ts;
+    const clarificationIntent = message.thread_ts
+      ? await intentFromClarificationThread({
+        client,
+        channel: message.channel,
+        threadTs,
+        replyText: message.text || ""
+      })
+      : null;
+    if (!clarificationIntent && !/(add|create|update|move|assign|handoff|fathom|transcript|positive reply|interested)/i.test(combinedText)) return;
+    const intent = clarificationIntent || parseIntent(combinedText);
     if (intent.type === "unknown") return;
     if (!intent.company && intent.type === "update_deal_from_call") {
       intent.company = await inferCompanyFromThread({
         client,
         channel: message.channel,
-        threadTs: message.thread_ts || message.ts
+        threadTs
       });
     }
     if (!intent.company && ["add_lead", "create_deal", "assign_owner", "set_deal_stage", "move_to_handoff"].includes(intent.type)) return;
     intent.sourceEventId = `slack:${message.client_msg_id || message.ts}`;
-    intent.slackThread = `slack://${message.channel}/${message.ts}`;
+    intent.slackThread = `slack://${message.channel}/${threadTs}`;
     try {
       const text = await handleIntent({ intent, opsService });
-      await say({ text, thread_ts: message.ts });
+      await say({ text, thread_ts: threadTs });
     } catch (error) {
-      await say({ text: `I could not complete that: ${error.message}`, thread_ts: message.ts });
+      await say({ text: `I could not complete that: ${error.message}`, thread_ts: threadTs });
     }
   });
 
   return { app, receiver };
 }
 
-module.exports = { collectAttachedText, createSlackApp, fathomUpdateText, handleIntent, helpText, inferCompanyFromThread };
+module.exports = {
+  buildClarifiedIntent,
+  clarificationQuestion,
+  collectAttachedText,
+  createSlackApp,
+  fathomUpdateText,
+  handleIntent,
+  helpText,
+  inferCompanyFromThread,
+  isLeadingUserMention
+};
