@@ -59,14 +59,20 @@ function firstValue(input, section) {
   return sectionFromNotes(input?.Notes || input?.notes, section.label);
 }
 
+function sectionMaxItems(label) {
+  if (label === "Key questions asked") return 4;
+  if (label === "Next steps") return 3;
+  if (label === "Skills needed") return 3;
+  return 2;
+}
+
 function callSummarySections(input = {}) {
   return SUMMARY_SECTIONS.map((section) => {
     const fallback = section.label === "Need"
       ? firstNonEmpty(input.project_scope, input["Project Scope"])
       : "";
     const value = firstNonEmpty(firstValue(input, section), fallback);
-    const maxItems = ["Skills needed", "Key questions asked"].includes(section.label) ? 3 : 2;
-    const points = splitPoints(value, maxItems);
+    const points = splitPoints(value, sectionMaxItems(section.label));
     return {
       label: section.label,
       points: points.length ? points : ["Not captured."]
