@@ -117,6 +117,89 @@ test("clarification replies complete the original thread intent", () => {
   assert.doesNotMatch(intent.notes, /\s+\./);
 });
 
+test("parseIntent maps At Company as a deal phrasing", () => {
+  const intent = parseIntent([
+    "At HelloFresh, as a deal, the call was had on Thursday last week and Laurent said that he would distribute some materials with internal stakeholders.",
+    "We sent him a one-pager.",
+    "Account executive owner is Gianluca Vendramini.",
+    "The deal is considering stage."
+  ].join(" "));
+
+  assert.equal(intent.type, "create_deal");
+  assert.equal(intent.company, "HelloFresh");
+  assert.equal(intent.owner, "Gianluca Vendramini");
+  assert.equal(intent.stage, "Considering");
+  assert.equal(intent.callDate, "May 28, 2026");
+  assert.equal(intent.nextSteps, "Laurent will distribute some materials with internal stakeholders");
+});
+
+test("clarification ignores bot error replies and keeps prior user context", () => {
+  const intent = buildClarifiedIntent(
+    [
+      {
+        text: "At HelloFresh, as a deal, the call was had on Thursday last week and Laurent said that he would distribute some materials with internal stakeholders. We sent him a one-pager. Account executive owner is Gianluca Vendramini. The deal is considering stage."
+      },
+      {
+        bot_id: "B123",
+        text: "I could not confidently map that to a pipeline action. Try `help` for examples, or include the company name and desired action."
+      },
+      {
+        text: "add as deal and lead"
+      },
+      {
+        bot_id: "B123",
+        text: "Before I update the tracker, I need one thing: Who's the main contact?"
+      }
+    ],
+    "Laurent Guillemein\n!gui@hellofresh.com"
+  );
+
+  assert.equal(intent.type, "create_deal");
+  assert.equal(intent.company, "HelloFresh");
+  assert.equal(intent.companyDomain, "hellofresh.com");
+  assert.equal(intent.firstName, "Laurent");
+  assert.equal(intent.lastName, "Guillemein");
+  assert.equal(intent.email, "gui@hellofresh.com");
+  assert.equal(intent.owner, "Gianluca Vendramini");
+  assert.equal(intent.stage, "Considering");
+  assert.equal(intent.callDate, "May 28, 2026");
+  assert.equal(clarificationQuestion(intent), "What's the source? Use Outreach, Customer, Referral, or Girdley Media.");
+});
+
+test("clarification replay can finish an already-open manual deal thread", () => {
+  const intent = buildClarifiedIntent(
+    [
+      {
+        text: "At HelloFresh, as a deal, the call was had on Thursday last week and Laurent said that he would distribute some materials with internal stakeholders. We sent him a one-pager. Account executive owner is Gianluca Vendramini. The deal is considering stage."
+      },
+      {
+        bot_id: "B123",
+        text: "I could not confidently map that to a pipeline action. Try `help` for examples, or include the company name and desired action."
+      },
+      {
+        text: "add as deal and lead"
+      },
+      {
+        bot_id: "B123",
+        text: "Before I update the tracker, I need one thing: Who's the main contact?"
+      },
+      {
+        text: "Laurent Guillemein\n!gui@hellofresh.com"
+      }
+    ],
+    "Customer"
+  );
+
+  assert.equal(intent.type, "create_deal");
+  assert.equal(intent.company, "HelloFresh");
+  assert.equal(intent.firstName, "Laurent");
+  assert.equal(intent.lastName, "Guillemein");
+  assert.equal(intent.email, "gui@hellofresh.com");
+  assert.equal(intent.source, "Customer");
+  assert.equal(intent.stage, "Considering");
+  assert.equal(clarificationQuestion(intent), "");
+});
+
 test("broad Slack message handler can skip direct bot mentions", () => {
   assert.equal(isLeadingUserMention("<@U0B6XJ2SWUB|Near AI OS> add a deal"), true);
   assert.equal(isLeadingUserMention("Drop this Fathom URL <https://fathom.video/share/abc>"), false);
