@@ -101,7 +101,8 @@ function normalizeSlackMarkup(text) {
     .replace(/<(https?:\/\/[^>]+)>/gi, "$1")
     .replace(/<@[^>]+>/g, "")
     .replace(/\*Sent using\*\s+ChatGPT/gi, "")
-    .replace(/^\s*-\s*/, "");
+    .replace(/^\s*-\s*/, "")
+    .replace(/\s+\./g, ".");
 }
 
 function dateWithYear(value) {
@@ -120,8 +121,9 @@ function extractNextSteps(text) {
   const match = text.match(/\bnext steps?\s+(?:is|are|:)\s+(.+?)(?=(?:\.\s+(?:account executive\s+|ae\s+)?owner\b|\.\s+(?:source|campaign)\b|$))/i);
   if (!match) return "";
   return cleanText(match[1])
+    .replace(/\s+\./g, ".")
     .replace(/^for\s+/i, "")
-    .replace(/[.]+$/g, "");
+    .replace(/[.\s]+$/g, "");
 }
 
 function parseIntent(text) {
