@@ -5,7 +5,7 @@ const { parseIntent } = require("../src/domain/intent");
 const { generateHandoffMessage } = require("../src/domain/handoff");
 const { diagnose, syncWeeklyMetrics, weekStart } = require("../src/ops/metrics");
 const { OpsService } = require("../src/ops/service");
-const { htmlTranscriptToText, parseFathomSharePage, transcriptToText } = require("../src/integrations/fathom");
+const { fetchFathomRecording, htmlTranscriptToText, parseFathomSharePage, transcriptToText } = require("../src/integrations/fathom");
 const { Repository, firstEmptyRowNumber, mergePreservingExisting } = require("../src/sheets/repository");
 const { handleIntent, inferCompanyFromThread } = require("../src/slack/app");
 const { isPositiveReply, normalizeSmartleadReply } = require("../src/integrations/smartlead");
@@ -135,6 +135,55 @@ test("Fathom share pages expose company metadata and transcript text", () => {
   const text = htmlTranscriptToText("<p><a>@0:09</a> - <b>Client</b></p><p>Need n8n and API automation.</p>");
   assert.match(text, /Client/);
   assert.match(text, /Need n8n and API automation/);
+});
+
+test("Fathom share fetch uses API summary when an API key is configured", async () => {
+  const originalFetch = global.fetch;
+  const sharePage = JSON.stringify({
+    props: {
+      call: {
+        id: 692333461,
+        title: "AI Automation //Pisteyo + Near",
+        started_at: "2026-05-29T17:00:00.000000Z",
+        company: { name: "Pisteyo", domain: "pisteyo.com" }
+      },
+      copyTranscriptUrl: "https://fathom.video/calls/692333461/copy_transcript?token=abc"
+    }
+  }).replace(/"/g, "&quot;");
+  const calls = [];
+  global.fetch = async (url) => {
+    calls.push(String(url));
+    if (String(url).includes("/share/abc")) {
+      return { ok: true, text: async () => `<div id="app" data-page="${sharePage}"></div>` };
+    }
+    if (String(url).includes("/summary")) {
+      return {
+        ok: true,
+        json: async () => ({
+          summary: { markdown_formatted: "- Need Zapier support\n- Next step: send profiles" }
+        })
+      };
+    }
+    if (String(url).includes("/copy_transcript")) {
+      return {
+        ok: true,
+        json: async () => ({ html: "<p><b>Client</b></p><p>Need Zapier and APIs.</p>" })
+      };
+    }
+    throw new Error(`Unexpected fetch ${url}`);
+  };
+
+  try {
+    const recording = await fetchFathomRecording(
+      { fathom: { apiKey: "fathom-key", baseUrl: "https://api.fathom.ai/external/v1" } },
+      "https://fathom.video/share/abc"
+    );
+    assert.match(recording.summaryText, /Need Zapier support/);
+    assert.match(recording.transcriptText, /Need Zapier and APIs/);
+    assert.ok(calls.some((url) => url.includes("/recordings/692333461/summary")));
+  } finally {
+    global.fetch = originalFetch;
+  }
 });
 
 test("repository merge preserves existing non-empty values on partial updates", () => {
@@ -793,6 +842,7 @@ test("Fathom payload normalizes transcript and recording identity", () => {
     recording: {
       id: "rec_1",
       url: "https://fathom.video/share/rec_1",
+      default_summary: { markdown_formatted: "Fathom summary: needs Zapier support." },
       transcript: [{ speaker: { display_name: "Client" }, text: "Need Zapier and APIs." }]
     },
     company: "CP Brands",
@@ -800,6 +850,7 @@ test("Fathom payload normalizes transcript and recording identity", () => {
   });
   assert.equal(payload.sourceEventId, "fathom_1");
   assert.equal(payload.recordingId, "rec_1");
+  assert.match(payload.summaryText, /needs Zapier support/);
   assert.equal(payload.transcriptText, "Client: Need Zapier and APIs.");
 });
 
