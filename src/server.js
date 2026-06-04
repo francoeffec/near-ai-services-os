@@ -1,10 +1,10 @@
 const express = require("express");
 const { extractionStatus } = require("./config");
 const { bootstrapSpreadsheet } = require("./sheets/bootstrap");
-const { normalizeBooking } = require("./integrations/booking");
+const { bookingIncluded, normalizeBooking } = require("./integrations/booking");
 const { normalizeFathomPayload, fetchFathomTranscript } = require("./integrations/fathom");
 const { verifyFathomWebhookSignature } = require("./integrations/fathom-webhook");
-const { isPositiveReply, normalizeSmartleadReply } = require("./integrations/smartlead");
+const { campaignIncluded, isPositiveReply, normalizeSmartleadReply } = require("./integrations/smartlead");
 const { syncWeeklyMetrics } = require("./ops/metrics");
 
 function requireSecret(config, req, res) {
@@ -41,6 +41,11 @@ function requireAdmin(config, req, res) {
   return true;
 }
 
+async function duplicateEvent(repository, eventId) {
+  if (!eventId || !repository.findEventById) return false;
+  return Boolean(await repository.findEventById(eventId));
+}
+
 function attachRoutes({ receiver, config, opsService, repository, sheetsClient }) {
   const app = receiver.app;
   app.use(express.json({
@@ -72,8 +77,14 @@ function attachRoutes({ receiver, config, opsService, repository, sheetsClient }
   app.post("/webhooks/smartlead", async (req, res) => {
     if (!requireSecret(config, req, res)) return;
     try {
+      const eventId = req.body.event_id || req.body.id || req.body.reply_id || req.body.webhook_id;
+      if (await duplicateEvent(repository, eventId)) {
+        res.json({ ok: true, duplicate: true });
+        return;
+      }
       if (!isPositiveReply(req.body)) {
         await repository.addEvent({
+          eventId,
           source: "Smartlead",
           eventType: "ignored_reply",
           status: "ignored",
@@ -84,7 +95,28 @@ function attachRoutes({ receiver, config, opsService, repository, sheetsClient }
         return;
       }
       const lead = normalizeSmartleadReply(req.body);
+      const campaign = req.body.campaign || {};
+      const campaignForFilter = {
+        name: lead.campaign,
+        campaign_name: lead.campaign,
+        id: lead.campaignId,
+        campaign_id: lead.campaignId,
+        status: campaign.status || campaign.campaign_status || req.body.campaign_status
+      };
+      if (!campaignIncluded(config, campaignForFilter)) {
+        await repository.addEvent({
+          eventId: lead.sourceEventId,
+          source: "Smartlead",
+          eventType: "ignored_campaign",
+          status: "ignored",
+          summary: `Smartlead positive reply ignored because campaign is not included: ${lead.campaign || lead.campaignId || "unknown campaign"}`,
+          rawPayload: req.body
+        });
+        res.json({ ok: true, ignored: true, reason: "campaign_not_included" });
+        return;
+      }
       const result = await opsService.addLead(lead);
+      await opsService.notifySmartleadLead(result, lead);
       res.json({ ok: true, created: result.created, lead: result.row });
     } catch (error) {
       res.status(500).json({ ok: false, error: error.message });
@@ -94,8 +126,27 @@ function attachRoutes({ receiver, config, opsService, repository, sheetsClient }
   app.post("/webhooks/chili-piper", async (req, res) => {
     if (!requireSecret(config, req, res)) return;
     try {
+      const eventId = req.body.event_id || req.body.id || req.body.booking?.id || req.body.event?.id || req.body.meeting?.id;
+      if (await duplicateEvent(repository, eventId)) {
+        res.json({ ok: true, duplicate: true });
+        return;
+      }
       const deal = normalizeBooking(req.body);
+      if (!bookingIncluded(config, deal)) {
+        await repository.addEvent({
+          eventId: deal.sourceEventId,
+          source: "Chili Piper",
+          eventType: "ignored_booking",
+          status: "ignored",
+          summary: `Chili Piper booking ignored because meeting is not included: ${deal.campaign || "unknown meeting"}`,
+          rawPayload: req.body
+        });
+        res.json({ ok: true, ignored: true, reason: "booking_not_included" });
+        return;
+      }
+      if (!deal.callBookedOn) deal.callBookedOn = new Date().toISOString();
       const result = await opsService.createDeal(deal);
+      await opsService.notifyChiliPiperDeal(result, deal);
       res.json({ ok: true, created: result.created, deal: result.row });
     } catch (error) {
       res.status(500).json({ ok: false, error: error.message });
