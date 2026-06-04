@@ -61,7 +61,7 @@ function loadConfig({ strict = true } = {}) {
     },
     booking: {
       calendarIds: optionalList("GOOGLE_CALENDAR_IDS"),
-      titleMatch: optionalList("BOOKING_EVENT_TITLE_MATCH", "AI Automation,+ Near")
+      titleMatch: optionalList("BOOKING_EVENT_TITLE_MATCH", "AI Automation,AI Engineering,AI Services,+ Near")
     },
     scheduler: {
       enabled: String(process.env.ENABLE_SCHEDULER || "").toLowerCase() === "true",
