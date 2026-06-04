@@ -13,7 +13,36 @@ Endpoint:
 POST /webhooks/smartlead
 ```
 
-The adapter accepts common Smartlead-style shapes and only creates a Lead when the payload category, reply category, status, type, or sentiment contains `positive` or `interested`.
+The adapter accepts common Smartlead-style shapes and native Smartlead webhook payloads. It creates or updates a Lead when the payload category, reply category, status, type, or sentiment contains `positive` or `interested`.
+
+Recommended setup: configure Smartlead to send category-filtered reply notifications to:
+
+```text
+POST /webhooks/smartlead?secret=WEBHOOK_SHARED_SECRET&positive=true
+```
+
+Use Smartlead's positive lead categories only. You can fetch those category IDs with Smartlead's `GET /api/v1/leads/fetch-categories` endpoint and include categories whose `sentiment_type` is `positive`, such as `Interested` or `Meeting Booked`.
+
+For Smartlead's webhook create endpoint, use the pattern below. Replace the `category_id_map` keys with your account's positive category IDs:
+
+```json
+{
+  "name": "NearAI Services Positive Replies",
+  "webhook_url": "https://YOUR_HOST/webhooks/smartlead?secret=WEBHOOK_SHARED_SECRET&positive=true",
+  "association_type": "campaign",
+  "email_campaign_id": 123,
+  "event_type_map": {
+    "EMAIL_REPLY": true,
+    "LEAD_CATEGORY_UPDATED": true
+  },
+  "category_id_map": {
+    "1": true,
+    "3": true
+  }
+}
+```
+
+Set `email_campaign_id` per AI Services campaign. The service still filters by `SMARTLEAD_INCLUDED_CAMPAIGN_MATCH`, so non-AI campaigns are ignored even if they send events.
 
 The lead is only written when the campaign matches `SMARTLEAD_INCLUDED_CAMPAIGN_MATCH` and does not match an excluded campaign status. Matches can be campaign-name fragments such as `AI` or exact campaign IDs. Matching positive replies create or update the `Leads` tab with:
 
