@@ -1273,6 +1273,49 @@ test("Smartlead positive reply payload normalizes into lead fields", () => {
   }, { campaign_name: "General Hiring", campaign_status: "ACTIVE" }), false);
 });
 
+test("Smartlead native reply webhook can be trusted when category-filtered", () => {
+  const payload = {
+    event_type: "EMAIL_REPLY",
+    from_email: "sender@near.com",
+    to_email: "jane@example.com",
+    to_name: "Jane Doe",
+    time_replied: "2026-06-04T15:30:00Z",
+    reply_body: "<p>Sounds interesting. Can you send more details?</p>",
+    preview_text: "Sounds interesting. Can you send more details?",
+    campaign_name: "AI Engineering Services - CEOs",
+    campaign_id: 123,
+    lead_data: {
+      id: "lead_123",
+      company_name: "Example Co"
+    }
+  };
+
+  assert.equal(isPositiveReply(payload), false);
+  assert.equal(isPositiveReply(payload, { assumePositive: true }), true);
+  const lead = normalizeSmartleadReply(payload);
+  assert.match(lead.sourceEventId, /^smartlead:EMAIL_REPLY:123:lead_123:jane@example\.com:2026-06-04T15:30:00Z$/);
+  assert.equal(lead.company, "Example Co");
+  assert.equal(lead.firstName, "Jane");
+  assert.equal(lead.lastName, "Doe");
+  assert.equal(lead.email, "jane@example.com");
+  assert.equal(lead.campaign, "AI Engineering Services - CEOs");
+  assert.equal(lead.campaignId, "123");
+  assert.equal(lead.smartleadLeadId, "lead_123");
+  assert.equal(lead.lastReplyAt, "2026-06-04T15:30:00Z");
+  assert.equal(lead.replySummary, "Sounds interesting. Can you send more details?");
+});
+
+test("Smartlead category update webhook is positive when category says interested", () => {
+  assert.equal(isPositiveReply({
+    event_type: "LEAD_CATEGORY_UPDATED",
+    lead_email: "jane@example.com",
+    category: {
+      name: "Interested",
+      sentiment_type: "positive"
+    }
+  }), true);
+});
+
 test("booking payload normalizes into call-booked deal fields", () => {
   const booking = normalizeBooking({
     event_id: "booking_1",
@@ -1418,8 +1461,9 @@ test("pipeline webhook notifications post concise Slack updates", async () => {
   assert.equal(leadLink, "slack://C-ai-leads/123.1");
   assert.equal(dealLink, "slack://C-ai-leads/123.2");
   assert.equal(hubspotLink, "slack://C-ai-leads/123.3");
-  assert.match(posts[0].text, /Created lead from Smartlead positive reply: \*Mantra Health\*/);
+  assert.match(posts[0].text, /New positive Smartlead reply: \*Mantra Health\*/);
   assert.match(posts[0].text, /Campaign: AI HealthTech/);
+  assert.match(posts[0].text, /Tracker: Created lead, stage Replied Positive\./);
   assert.match(posts[1].text, /Created deal from Chili Piper booking: \*Venveo\*/);
   assert.match(posts[1].text, /Updated lead stage to Call Booked/);
   assert.match(posts[2].text, /Updated deal from HubSpot booking: \*HelloFresh\*/);
