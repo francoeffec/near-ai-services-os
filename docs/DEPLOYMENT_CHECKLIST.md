@@ -18,6 +18,7 @@ The app exposes:
 - `GET /readyz`
 - `POST /slack/events`
 - `POST /webhooks/smartlead`
+- `POST /webhooks/hubspot-meeting`
 - `POST /webhooks/chili-piper`
 - `POST /webhooks/fathom`
 - `POST /jobs/weekly-metrics`
@@ -102,6 +103,12 @@ Smartlead:
 
 ```text
 POST https://YOUR_HOST/webhooks/smartlead?secret=WEBHOOK_SHARED_SECRET
+```
+
+HubSpot meeting bookings:
+
+```text
+POST https://YOUR_HOST/webhooks/hubspot-meeting?secret=WEBHOOK_SHARED_SECRET
 ```
 
 Chili Piper or Zapier booking bridge:
