@@ -20,6 +20,7 @@ function normalizeSmartleadReply(payload) {
 
   return {
     sourceEventId: firstNonEmpty(payload.event_id, payload.id, payload.reply_id, payload.webhook_id),
+    eventSource: "Smartlead",
     company: firstNonEmpty(lead.company, lead.company_name, payload.company, payload.company_name),
     firstName: firstNonEmpty(lead.first_name, payload.first_name, split.firstName),
     lastName: firstNonEmpty(lead.last_name, payload.last_name, split.lastName),
@@ -85,9 +86,13 @@ async function fetchSmartleadCampaigns(config, window = {}) {
 
 function campaignIncluded(config, campaign) {
   const name = String(campaign.name || campaign.campaign_name || "");
+  const id = String(campaign.id || campaign.campaign_id || "");
   const status = String(campaign.status || campaign.campaign_status || "").toUpperCase();
   const excluded = config.smartlead.excludedStatuses.some((value) => status.includes(value));
-  const included = config.smartlead.includedCampaignMatch.length === 0 || config.smartlead.includedCampaignMatch.some((value) => name.toLowerCase().includes(value.toLowerCase()));
+  const included = config.smartlead.includedCampaignMatch.length === 0 || config.smartlead.includedCampaignMatch.some((value) => {
+    const match = value.toLowerCase();
+    return name.toLowerCase().includes(match) || id.toLowerCase() === match;
+  });
   return included && !excluded;
 }
 
