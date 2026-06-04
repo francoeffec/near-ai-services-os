@@ -48,6 +48,14 @@ function contactText(row = {}) {
   return name || email || "Not captured";
 }
 
+function slackMentions(userIds = []) {
+  return userIds
+    .map(cleanText)
+    .filter(Boolean)
+    .map((userId) => `<@${userId}>`)
+    .join(" ");
+}
+
 const ACQUISITION_SOURCES = ["Outreach", "Customer", "Referral", "Girdley Media"];
 const OWNER_ALIASES = new Map([
   ["fp", "Franco Pereyra"],
@@ -232,8 +240,10 @@ class OpsService {
   async notifySmartleadLead(result, input = {}) {
     const row = result.row || {};
     const reply = truncate(input.replySummary || input.notes || row.Notes);
+    const mentions = slackMentions(this.config.slack.smartleadNotifyUserIds);
     const lines = [
       `New positive Smartlead reply: *${row.Company || "Unknown company"}*`,
+      mentions ? `cc: ${mentions}` : "",
       `Contact: ${contactText(row)}`,
       `Campaign: ${row.Campaign || "Not captured"}`,
       reply ? `Reply: ${reply}` : "",
