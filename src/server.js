@@ -77,12 +77,14 @@ function attachRoutes({ receiver, config, opsService, repository, sheetsClient }
   app.post("/webhooks/smartlead", async (req, res) => {
     if (!requireSecret(config, req, res)) return;
     try {
-      const eventId = req.body.event_id || req.body.id || req.body.reply_id || req.body.webhook_id;
+      const lead = normalizeSmartleadReply(req.body);
+      const eventId = lead.sourceEventId;
       if (await duplicateEvent(repository, eventId)) {
         res.json({ ok: true, duplicate: true });
         return;
       }
-      if (!isPositiveReply(req.body)) {
+      const assumePositive = ["true", "1", "yes"].includes(String(req.query.positive || "").toLowerCase());
+      if (!isPositiveReply(req.body, { assumePositive })) {
         await repository.addEvent({
           eventId,
           source: "Smartlead",
@@ -94,7 +96,6 @@ function attachRoutes({ receiver, config, opsService, repository, sheetsClient }
         res.json({ ok: true, ignored: true });
         return;
       }
-      const lead = normalizeSmartleadReply(req.body);
       const campaign = req.body.campaign || {};
       const campaignForFilter = {
         name: lead.campaign,
