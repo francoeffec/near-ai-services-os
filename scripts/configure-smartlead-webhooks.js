@@ -57,6 +57,21 @@ function campaignStatus(campaign) {
   return String(campaign.status || campaign.campaign_status || "").toUpperCase();
 }
 
+function webhookIdFromResponse(result) {
+  const candidates = [
+    result.id,
+    result.webhook_id,
+    result.data?.id,
+    result.data?.webhook_id,
+    result.data?.webhook?.id,
+    result.webhook?.id
+  ];
+  for (const value of candidates) {
+    if (typeof value === "string" || typeof value === "number") return value;
+  }
+  return null;
+}
+
 function includedCampaigns(config, campaigns) {
   const included = list(process.env.SMARTLEAD_INCLUDED_CAMPAIGN_MATCH, "AI").map((item) => item.toLowerCase());
   const excluded = list(process.env.SMARTLEAD_EXCLUDED_STATUSES, "PAUSED,COMPLETED,ARCHIVED").map((item) => item.toUpperCase());
@@ -146,7 +161,7 @@ async function main() {
       campaignId: id,
       campaign: name,
       status: "created",
-      webhookId: result.id || result.data?.id || null,
+      webhookId: webhookIdFromResponse(result),
       ok: result.ok ?? result.success ?? true
     }));
   }
