@@ -6,7 +6,7 @@ The product model is simple:
 
 - Google Sheets is the database.
 - Slack is the user interface.
-- Smartlead, Chili Piper or booking webhooks, and Fathom are input sources.
+- Smartlead, HubSpot meeting webhooks, Chili Piper fallback booking webhooks, and Fathom are input sources.
 - The service is the automation layer that keeps every tab synchronized.
 
 ## Why This Architecture
@@ -18,7 +18,7 @@ The tradeoff is that we need a deployed service and secrets, but the payoff is m
 ## What It Does
 
 - Creates and updates leads from Slack or Smartlead positive replies.
-- Creates deals from Slack, Chili Piper/Zapier booking payloads, or calendar-style booking payloads.
+- Creates deals from Slack, HubSpot meeting bookings, Chili Piper/Zapier booking payloads, or calendar-style booking payloads.
 - Creates or updates deals and lead rows from Fathom share URLs, transcript payloads, or pasted/attached call notes in Slack.
 - Moves deals to handoff and generates a Slack handoff message.
 - Sends Handoff tab recaps to Slack when `Send Handoff Recap` is checked on a row.
@@ -109,6 +109,7 @@ The app is Docker-ready and can run on Render, Fly.io, Railway, Cloud Run, or an
 6. Deploy the service.
 7. Register webhooks:
    - Smartlead positive replies to `/webhooks/smartlead?secret=...`
+   - HubSpot meeting bookings to `/webhooks/hubspot-meeting?secret=...`
    - Chili Piper/Zapier booking payloads to `/webhooks/chili-piper?secret=...`
    - Fathom transcript payloads to `/webhooks/fathom?secret=...`
 8. Use the `Metrics` tab for live pipeline reporting from the sheet data.
