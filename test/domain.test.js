@@ -9,8 +9,8 @@ const { OpsService } = require("../src/ops/service");
 const { fetchFathomRecording, htmlTranscriptToText, parseFathomSharePage, transcriptToText } = require("../src/integrations/fathom");
 const { Repository, firstEmptyRowNumber, mergePreservingExisting } = require("../src/sheets/repository");
 const { buildClarifiedIntent, clarificationQuestion, handleIntent, inferCompanyFromThread, isLeadingUserMention } = require("../src/slack/app");
-const { isPositiveReply, normalizeSmartleadReply } = require("../src/integrations/smartlead");
-const { normalizeBooking } = require("../src/integrations/booking");
+const { campaignIncluded, isPositiveReply, normalizeSmartleadReply } = require("../src/integrations/smartlead");
+const { bookingIncluded, normalizeBooking } = require("../src/integrations/booking");
 const { normalizeFathomPayload } = require("../src/integrations/fathom");
 const { extractionStatus, loadConfig, validateConfig } = require("../src/config");
 const { shouldRunMetrics } = require("../src/jobs/scheduler");
@@ -1246,6 +1246,7 @@ test("Smartlead positive reply payload normalizes into lead fields", () => {
   assert.equal(isPositiveReply(payload), true);
   assert.deepEqual(normalizeSmartleadReply(payload), {
     sourceEventId: "reply_1",
+    eventSource: "Smartlead",
     company: "Mantra Health",
     firstName: "Thomas",
     lastName: "Bazerghi",
@@ -1258,6 +1259,18 @@ test("Smartlead positive reply payload normalizes into lead fields", () => {
     replySummary: "Interested. Can we meet Friday?",
     notes: "Interested. Can we meet Friday?"
   });
+  assert.equal(campaignIncluded({
+    smartlead: {
+      includedCampaignMatch: ["AI"],
+      excludedStatuses: ["PAUSED", "COMPLETED", "ARCHIVED"]
+    }
+  }, { campaign_name: "AI HealthTech", campaign_status: "ACTIVE" }), true);
+  assert.equal(campaignIncluded({
+    smartlead: {
+      includedCampaignMatch: ["AI"],
+      excludedStatuses: ["PAUSED", "COMPLETED", "ARCHIVED"]
+    }
+  }, { campaign_name: "General Hiring", campaign_status: "ACTIVE" }), false);
 });
 
 test("booking payload normalizes into call-booked deal fields", () => {
@@ -1268,6 +1281,7 @@ test("booking payload normalizes into call-booked deal fields", () => {
       id: "booking_1",
       meeting_type: "AI Automation // + Near",
       start_time: "2026-06-01T15:00:00-03:00",
+      host: { name: "Camila Bagnati" },
       prospect: {
         name: "Zach Williams",
         email: "zach@venveo.com",
@@ -1277,8 +1291,67 @@ test("booking payload normalizes into call-booked deal fields", () => {
   });
   assert.equal(booking.company, "Venveo");
   assert.equal(booking.email, "zach@venveo.com");
+  assert.equal(booking.eventSource, "Chili Piper");
+  assert.equal(booking.source, "Outreach");
+  assert.equal(booking.campaign, "AI Automation // + Near");
+  assert.equal(booking.owner, "Camila Bagnati");
   assert.equal(booking.stage, "Call Booked");
   assert.equal(booking.callStatus, "Scheduled");
+  assert.equal(bookingIncluded({ booking: { titleMatch: ["AI Automation", "+ Near"] } }, booking), true);
+  assert.equal(bookingIncluded({ booking: { titleMatch: ["Discovery"] } }, booking), false);
+});
+
+test("pipeline webhook notifications post concise Slack updates", async () => {
+  const posts = [];
+  const service = new OpsService({
+    repository: null,
+    config: { slack: { aiLeadsChannelId: "C-ai-leads" } },
+    slackClient: {
+      chat: {
+        async postMessage(message) {
+          posts.push(message);
+          return { ts: `123.${posts.length}` };
+        }
+      }
+    }
+  });
+
+  const leadLink = await service.notifySmartleadLead({
+    created: true,
+    row: {
+      Company: "Mantra Health",
+      "First Name": "Thomas",
+      "Last Name": "Bazerghi",
+      Email: "t.bazerghi@mantrahealth.com",
+      Campaign: "AI HealthTech",
+      "Lead Stage": "Replied Positive"
+    }
+  }, {
+    replySummary: "Interested. Can we meet Friday?"
+  });
+
+  const dealLink = await service.notifyChiliPiperDeal({
+    created: true,
+    leadResult: { created: false },
+    row: {
+      Company: "Venveo",
+      "First Name": "Zach",
+      "Last Name": "Williams",
+      Email: "zach@venveo.com",
+      Owner: "Camila Bagnati",
+      "Call Had Date": "Jun 1, 2026",
+      "Call Booked On": "May 29, 2026",
+      Campaign: "AI Automation // + Near"
+    }
+  });
+
+  assert.equal(leadLink, "slack://C-ai-leads/123.1");
+  assert.equal(dealLink, "slack://C-ai-leads/123.2");
+  assert.match(posts[0].text, /Created lead from Smartlead positive reply: \*Mantra Health\*/);
+  assert.match(posts[0].text, /Campaign: AI HealthTech/);
+  assert.match(posts[1].text, /Created deal from Chili Piper booking: \*Venveo\*/);
+  assert.match(posts[1].text, /Updated lead stage to Call Booked/);
+  assert.equal(posts[0].channel, "C-ai-leads");
 });
 
 test("Fathom payload normalizes transcript and recording identity", () => {
