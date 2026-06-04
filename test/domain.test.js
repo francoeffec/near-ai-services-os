@@ -10,7 +10,7 @@ const { fetchFathomRecording, htmlTranscriptToText, parseFathomSharePage, transc
 const { Repository, firstEmptyRowNumber, mergePreservingExisting } = require("../src/sheets/repository");
 const { buildClarifiedIntent, clarificationQuestion, handleIntent, inferCompanyFromThread, isLeadingUserMention } = require("../src/slack/app");
 const { campaignIncluded, isPositiveReply, normalizeSmartleadReply } = require("../src/integrations/smartlead");
-const { bookingIncluded, normalizeBooking } = require("../src/integrations/booking");
+const { bookingIncluded, normalizeBooking, normalizeHubSpotMeeting } = require("../src/integrations/booking");
 const { normalizeFathomPayload } = require("../src/integrations/fathom");
 const { extractionStatus, loadConfig, validateConfig } = require("../src/config");
 const { shouldRunMetrics } = require("../src/jobs/scheduler");
@@ -1301,6 +1301,62 @@ test("booking payload normalizes into call-booked deal fields", () => {
   assert.equal(bookingIncluded({ booking: { titleMatch: ["Discovery"] } }, booking), false);
 });
 
+test("HubSpot meeting payload normalizes into call-booked deal fields", () => {
+  const booking = normalizeHubSpotMeeting({
+    object: {
+      objectType: "MEETING",
+      objectId: "987",
+      properties: {
+        hs_object_id: "987",
+        hs_meeting_title: "AI Engineering Services intro",
+        hs_meeting_start_time: "2026-06-08T15:00:00.000Z",
+        createdate: "2026-06-04T13:00:00.000Z",
+        hs_meeting_body: "Prospect booked through Cami's HubSpot meeting link."
+      }
+    },
+    inputFields: {
+      first_name: "Laurent",
+      last_name: "Guillemein",
+      email: "lgui@hellofresh.com",
+      company: "HelloFresh",
+      owner_name: "Camila Bagnati"
+    }
+  });
+
+  assert.equal(booking.sourceEventId, "hubspot-meeting:987");
+  assert.equal(booking.eventSource, "HubSpot");
+  assert.equal(booking.company, "HelloFresh");
+  assert.equal(booking.firstName, "Laurent");
+  assert.equal(booking.lastName, "Guillemein");
+  assert.equal(booking.email, "lgui@hellofresh.com");
+  assert.equal(booking.source, "Outreach");
+  assert.equal(booking.campaign, "AI Engineering Services intro");
+  assert.equal(booking.owner, "Camila Bagnati");
+  assert.equal(booking.callDate, "2026-06-08T15:00:00.000Z");
+  assert.equal(booking.callBookedOn, "2026-06-04T13:00:00.000Z");
+  assert.equal(booking.stage, "Call Booked");
+  assert.equal(bookingIncluded({ booking: { titleMatch: ["AI Engineering"] } }, booking), true);
+
+  const flatBooking = normalizeHubSpotMeeting({
+    event_id: "hubspot-meeting-988",
+    meeting_title: "AI Services intro",
+    start_time: "1780930800000",
+    booked_at: "2026-06-04T13:00:00.000Z",
+    first_name: "Camila",
+    last_name: "Prospect",
+    email: "camila@example.com",
+    company: "ExampleCo",
+    owner_name: "Franco Pereyra"
+  });
+
+  assert.equal(flatBooking.sourceEventId, "hubspot-meeting-988");
+  assert.equal(flatBooking.company, "ExampleCo");
+  assert.equal(flatBooking.firstName, "Camila");
+  assert.equal(flatBooking.lastName, "Prospect");
+  assert.equal(flatBooking.owner, "Franco Pereyra");
+  assert.equal(flatBooking.callDate, "2026-06-08T15:00:00.000Z");
+});
+
 test("pipeline webhook notifications post concise Slack updates", async () => {
   const posts = [];
   const service = new OpsService({
@@ -1344,13 +1400,29 @@ test("pipeline webhook notifications post concise Slack updates", async () => {
       Campaign: "AI Automation // + Near"
     }
   });
+  const hubspotLink = await service.notifyBookingDeal({
+    created: false,
+    leadResult: { created: false },
+    row: {
+      Company: "HelloFresh",
+      "First Name": "Laurent",
+      "Last Name": "Guillemein",
+      Email: "lgui@hellofresh.com",
+      Owner: "Camila Bagnati",
+      "Call Had Date": "Jun 8, 2026",
+      "Call Booked On": "Jun 4, 2026",
+      Campaign: "AI Engineering Services intro"
+    }
+  }, "HubSpot");
 
   assert.equal(leadLink, "slack://C-ai-leads/123.1");
   assert.equal(dealLink, "slack://C-ai-leads/123.2");
+  assert.equal(hubspotLink, "slack://C-ai-leads/123.3");
   assert.match(posts[0].text, /Created lead from Smartlead positive reply: \*Mantra Health\*/);
   assert.match(posts[0].text, /Campaign: AI HealthTech/);
   assert.match(posts[1].text, /Created deal from Chili Piper booking: \*Venveo\*/);
   assert.match(posts[1].text, /Updated lead stage to Call Booked/);
+  assert.match(posts[2].text, /Updated deal from HubSpot booking: \*HelloFresh\*/);
   assert.equal(posts[0].channel, "C-ai-leads");
 });
 
