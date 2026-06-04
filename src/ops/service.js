@@ -29,6 +29,25 @@ function slackPermalink(channelId, ts) {
   return ts ? `slack://${channelId}/${ts}` : "";
 }
 
+function eventSource(input = {}, fallback = "Slack") {
+  const sourceEventId = cleanText(input.sourceEventId || input["Source Event ID"]);
+  if (/^slack/i.test(sourceEventId)) return "Slack";
+  return cleanText(input.eventSource || input.event_source) || fallback;
+}
+
+function truncate(value, max = 260) {
+  const text = cleanText(value);
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1).trim()}...`;
+}
+
+function contactText(row = {}) {
+  const name = [row["First Name"], row["Last Name"]].map(cleanText).filter(Boolean).join(" ");
+  const email = cleanText(row.Email);
+  if (name && email) return `${name} <${email}>`;
+  return name || email || "Not captured";
+}
+
 const ACQUISITION_SOURCES = ["Outreach", "Customer", "Referral", "Girdley Media"];
 const OWNER_ALIASES = new Map([
   ["fp", "Franco Pereyra"],
@@ -116,7 +135,7 @@ class OpsService {
     const result = await this.repository.upsert(SHEETS.leads, "Entity Key", key, row, "Lead ID", "lead");
     await this.repository.addEvent({
       eventId: input.sourceEventId || stableId("event", `lead:${key}:${nowIso()}`),
-      source: input.source || "Slack",
+      source: eventSource(input),
       eventType: "lead_upserted",
       entityKey: key,
       status: "processed",
@@ -179,13 +198,14 @@ class OpsService {
       campaign: row.Campaign,
       owner: row.Owner,
       source: row.Source,
+      eventSource: input.eventSource,
       stage: "Call Booked",
       nextStep: row["Next Steps"],
       sourceEventId: input.sourceEventId ? `${input.sourceEventId}:lead` : ""
     });
     await this.repository.addEvent({
       eventId: input.sourceEventId || stableId("event", `deal:${key}:${nowIso()}`),
-      source: input.source || "Slack",
+      source: eventSource(input),
       eventType: "deal_upserted",
       entityKey: key,
       status: "processed",
@@ -193,6 +213,48 @@ class OpsService {
       rawPayload: input
     });
     return { ...result, leadResult };
+  }
+
+  async postAiLeadsNotification(text) {
+    if (!this.slackClient || !this.config.slack.aiLeadsChannelId || !cleanText(text)) return "";
+    try {
+      const posted = await this.slackClient.chat.postMessage({
+        channel: this.config.slack.aiLeadsChannelId,
+        text
+      });
+      return slackPermalink(this.config.slack.aiLeadsChannelId, posted.ts);
+    } catch (error) {
+      console.warn("Failed to post AI leads notification", error.message);
+      return "";
+    }
+  }
+
+  async notifySmartleadLead(result, input = {}) {
+    const row = result.row || {};
+    const reply = truncate(input.replySummary || input.notes || row.Notes);
+    const lines = [
+      `${result.created ? "Created" : "Updated"} lead from Smartlead positive reply: *${row.Company || "Unknown company"}*`,
+      `Contact: ${contactText(row)}`,
+      `Campaign: ${row.Campaign || "Not captured"}`,
+      `Stage: ${row["Lead Stage"] || "Replied Positive"}`,
+      reply ? `Reply: ${reply}` : ""
+    ].filter(Boolean);
+    return this.postAiLeadsNotification(lines.join("\n"));
+  }
+
+  async notifyChiliPiperDeal(result) {
+    const row = result.row || {};
+    const leadResult = result.leadResult || {};
+    const lines = [
+      `${result.created ? "Created" : "Updated"} deal from Chili Piper booking: *${row.Company || "Unknown company"}*`,
+      `${leadResult.created ? "Created" : "Updated"} lead stage to Call Booked.`,
+      `Contact: ${contactText(row)}`,
+      `Owner: ${row.Owner || "Not captured"}`,
+      `Call scheduled for: ${row["Call Had Date"] || "Not captured"}`,
+      `Call booked on: ${row["Call Booked On"] || "Not captured"}`,
+      `Campaign/meeting: ${row.Campaign || "Not captured"}`
+    ];
+    return this.postAiLeadsNotification(lines.join("\n"));
   }
 
   async assignOwner(input) {
