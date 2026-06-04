@@ -1273,7 +1273,7 @@ test("Smartlead positive reply payload normalizes into lead fields", () => {
   }, { campaign_name: "General Hiring", campaign_status: "ACTIVE" }), false);
 });
 
-test("Smartlead native reply webhook can be trusted when category-filtered", () => {
+test("Smartlead native reply webhook is not trusted without a positive category", () => {
   const payload = {
     event_type: "EMAIL_REPLY",
     from_email: "sender@near.com",
@@ -1291,7 +1291,7 @@ test("Smartlead native reply webhook can be trusted when category-filtered", () 
   };
 
   assert.equal(isPositiveReply(payload), false);
-  assert.equal(isPositiveReply(payload, { assumePositive: true }), true);
+  assert.equal(isPositiveReply(payload, { assumePositive: true }), false);
   const lead = normalizeSmartleadReply(payload);
   assert.match(lead.sourceEventId, /^smartlead:EMAIL_REPLY:123:lead_123:jane@example\.com:2026-06-04T15:30:00Z$/);
   assert.equal(lead.company, "Example Co");
@@ -1314,6 +1314,29 @@ test("Smartlead category update webhook is positive when category says intereste
       sentiment_type: "positive"
     }
   }), true);
+});
+
+test("Smartlead out-of-office reply is not positive even with assumePositive", () => {
+  assert.equal(isPositiveReply({
+    event_type: "EMAIL_REPLY",
+    lead_email: "jason.walker@agencyrevolution.com",
+    reply_body: "I will be out of the office until Monday, June 15 and will respond after I return.",
+    category: {
+      name: "Out Of Office",
+      sentiment_type: "neutral"
+    }
+  }, { assumePositive: true }), false);
+});
+
+test("Smartlead not interested category is not positive", () => {
+  assert.equal(isPositiveReply({
+    event_type: "LEAD_CATEGORY_UPDATED",
+    lead_email: "jane@example.com",
+    category: {
+      name: "Not Interested",
+      sentiment_type: "not-positive"
+    }
+  }, { assumePositive: true }), false);
 });
 
 test("booking payload normalizes into call-booked deal fields", () => {
