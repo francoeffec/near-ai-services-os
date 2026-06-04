@@ -1427,7 +1427,7 @@ test("pipeline webhook notifications post concise Slack updates", async () => {
   const posts = [];
   const service = new OpsService({
     repository: null,
-    config: { slack: { aiLeadsChannelId: "C-ai-leads" } },
+    config: { slack: { aiLeadsChannelId: "C-ai-leads", smartleadNotifyUserIds: ["U-hector", "U-cami"] } },
     slackClient: {
       chat: {
         async postMessage(message) {
@@ -1485,6 +1485,7 @@ test("pipeline webhook notifications post concise Slack updates", async () => {
   assert.equal(dealLink, "slack://C-ai-leads/123.2");
   assert.equal(hubspotLink, "slack://C-ai-leads/123.3");
   assert.match(posts[0].text, /New positive Smartlead reply: \*Mantra Health\*/);
+  assert.match(posts[0].text, /cc: <@U-hector> <@U-cami>/);
   assert.match(posts[0].text, /Campaign: AI HealthTech/);
   assert.match(posts[0].text, /Tracker: Created lead, stage Replied Positive\./);
   assert.match(posts[1].text, /Created deal from Chili Piper booking: \*Venveo\*/);
