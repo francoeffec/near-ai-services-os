@@ -242,11 +242,11 @@ class OpsService {
     return this.postAiLeadsNotification(lines.join("\n"));
   }
 
-  async notifyChiliPiperDeal(result) {
+  async notifyBookingDeal(result, sourceLabel = "Booking") {
     const row = result.row || {};
     const leadResult = result.leadResult || {};
     const lines = [
-      `${result.created ? "Created" : "Updated"} deal from Chili Piper booking: *${row.Company || "Unknown company"}*`,
+      `${result.created ? "Created" : "Updated"} deal from ${sourceLabel} booking: *${row.Company || "Unknown company"}*`,
       `${leadResult.created ? "Created" : "Updated"} lead stage to Call Booked.`,
       `Contact: ${contactText(row)}`,
       `Owner: ${row.Owner || "Not captured"}`,
@@ -255,6 +255,10 @@ class OpsService {
       `Campaign/meeting: ${row.Campaign || "Not captured"}`
     ];
     return this.postAiLeadsNotification(lines.join("\n"));
+  }
+
+  async notifyChiliPiperDeal(result) {
+    return this.notifyBookingDeal(result, "Chili Piper");
   }
 
   async assignOwner(input) {
