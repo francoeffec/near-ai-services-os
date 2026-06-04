@@ -39,7 +39,8 @@ function loadConfig({ strict = true } = {}) {
       aiLeadsChannelId: get("SLACK_AI_LEADS_CHANNEL_ID", "C0B63R2TC3V"),
       handoffChannelId: process.env.SLACK_HANDOFF_CHANNEL_ID || process.env.SLACK_AI_LEADS_CHANNEL_ID || "C0B63R2TC3V",
       allowedUserIds: optionalList("SLACK_ALLOWED_USER_IDS"),
-      allowedChannelIds: optionalList("SLACK_ALLOWED_CHANNEL_IDS", process.env.SLACK_AI_LEADS_CHANNEL_ID || "C0B63R2TC3V")
+      allowedChannelIds: optionalList("SLACK_ALLOWED_CHANNEL_IDS", process.env.SLACK_AI_LEADS_CHANNEL_ID || "C0B63R2TC3V"),
+      smartleadNotifyUserIds: optionalList("SLACK_SMARTLEAD_NOTIFY_USER_IDS", "U0AJTD9PPCJ,U03TNM0UR4J")
     },
     ai: {
       apiKey: process.env.OPENAI_API_KEY || "",
