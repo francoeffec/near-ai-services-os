@@ -1,8 +1,82 @@
 const { cleanText, firstNonEmpty, splitName } = require("../domain/normalize");
 
-function isPositiveReply(payload) {
+function cleanReplyText(value) {
+  return cleanText(String(value || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#39;/gi, "'")
+    .replace(/&quot;/gi, "\""));
+}
+
+function lastReplyFromHistory(payload) {
+  const history = Array.isArray(payload.history) ? payload.history : [];
+  return [...history].reverse().find((item) => /reply/i.test(item.type || "")) || {};
+}
+
+function replyTextFromPayload(payload) {
+  const lastReply = payload.lastReply || payload.last_reply || {};
+  const historyReply = lastReplyFromHistory(payload);
+  return cleanReplyText(firstNonEmpty(
+    payload.preview_text,
+    payload.reply_preview,
+    payload.reply_body,
+    payload.message,
+    payload.reply_text,
+    payload.email_body,
+    payload.body,
+    lastReply.preview_text,
+    lastReply.email_body,
+    lastReply.body,
+    historyReply.preview_text,
+    historyReply.email_body,
+    historyReply.body
+  ));
+}
+
+function smartleadEventId(payload) {
+  return firstNonEmpty(
+    payload.event_id,
+    payload.id,
+    payload.reply_id,
+    payload.webhook_id,
+    payload.message_id,
+    [
+      "smartlead",
+      payload.event_type || payload.type,
+      payload.campaign_id || payload.campaign?.id,
+      payload.lead_id || payload.lead_data?.id || payload.lead?.id,
+      payload.lead_email || payload.to_email || payload.email || payload.lead_data?.email || payload.lead?.email,
+      payload.time_replied || payload.reply_at || payload.lastReply?.time || payload.created_at || payload.timestamp
+    ].map(cleanText).filter(Boolean).join(":")
+  );
+}
+
+function isReplyLike(payload) {
+  const eventType = cleanText(payload.event_type || payload.type).toUpperCase();
+  return /REPLY|REPLIED|LEAD_CATEGORY_UPDATED/.test(eventType) || Boolean(replyTextFromPayload(payload));
+}
+
+function isPositiveReply(payload, options = {}) {
+  if (options.assumePositive && isReplyLike(payload)) return true;
+  const leadData = payload.lead_data || {};
+  const category = payload.category || leadData.category || payload.lead?.category || {};
+  const categoryName = typeof category === "string" ? category : category.name;
+  const categorySentiment = typeof category === "object" ? category.sentiment_type : "";
   const fields = [
     payload.category,
+    categoryName,
+    categorySentiment,
+    payload.category_name,
+    payload.lead_category,
+    payload.lead_category_name,
+    payload.sentiment_type,
     payload.reply_category,
     payload.sentiment,
     payload.status,
@@ -14,24 +88,26 @@ function isPositiveReply(payload) {
 
 function normalizeSmartleadReply(payload) {
   const lead = payload.lead || payload.prospect || payload.contact || payload;
+  const leadData = payload.lead_data || {};
   const campaign = payload.campaign || {};
-  const fullName = firstNonEmpty(lead.name, lead.full_name, payload.name);
+  const fullName = firstNonEmpty(lead.name, lead.full_name, payload.name, payload.to_name, payload.lead_name);
   const split = splitName(fullName);
+  const replyText = replyTextFromPayload(payload);
 
   return {
-    sourceEventId: firstNonEmpty(payload.event_id, payload.id, payload.reply_id, payload.webhook_id),
+    sourceEventId: smartleadEventId(payload),
     eventSource: "Smartlead",
-    company: firstNonEmpty(lead.company, lead.company_name, payload.company, payload.company_name),
-    firstName: firstNonEmpty(lead.first_name, payload.first_name, split.firstName),
-    lastName: firstNonEmpty(lead.last_name, payload.last_name, split.lastName),
-    email: firstNonEmpty(lead.email, payload.email, payload.from_email),
+    company: firstNonEmpty(lead.company, lead.company_name, leadData.company_name, leadData.company, payload.company, payload.company_name),
+    firstName: firstNonEmpty(lead.first_name, leadData.first_name, payload.first_name, split.firstName),
+    lastName: firstNonEmpty(lead.last_name, leadData.last_name, payload.last_name, split.lastName),
+    email: firstNonEmpty(lead.email, leadData.email, payload.email, payload.lead_email, payload.to_email, payload.from_email),
     source: "Outreach",
     campaign: firstNonEmpty(campaign.name, payload.campaign_name, payload.campaign),
     campaignId: firstNonEmpty(campaign.id, payload.campaign_id),
-    smartleadLeadId: firstNonEmpty(lead.id, payload.lead_id),
-    lastReplyAt: firstNonEmpty(payload.reply_at, payload.created_at, payload.timestamp),
-    replySummary: cleanText(firstNonEmpty(payload.message, payload.reply_text, payload.email_body)).slice(0, 1000),
-    notes: cleanText(firstNonEmpty(payload.message, payload.reply_text, payload.email_body)).slice(0, 2000)
+    smartleadLeadId: firstNonEmpty(lead.id, leadData.id, payload.lead_id),
+    lastReplyAt: firstNonEmpty(payload.reply_at, payload.time_replied, payload.lastReply?.time, payload.last_reply?.time, lastReplyFromHistory(payload).time, payload.created_at, payload.timestamp),
+    replySummary: replyText.slice(0, 1000),
+    notes: replyText.slice(0, 2000)
   };
 }
 
