@@ -45,6 +45,23 @@ async function smartleadPost(baseUrl, apiKey, path, body) {
   return data;
 }
 
+async function smartleadPut(baseUrl, apiKey, path, body) {
+  const response = await fetch(smartleadUrl(baseUrl, path, apiKey), {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const text = await response.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = { text };
+  }
+  if (!response.ok) throw new Error(`${path} failed with ${response.status}: ${text.slice(0, 240)}`);
+  return data;
+}
+
 function campaignId(campaign) {
   return campaign.id || campaign.campaign_id;
 }
@@ -72,6 +89,10 @@ function webhookIdFromResponse(result) {
   return null;
 }
 
+function existingWebhookId(webhook) {
+  return webhook.id || webhook.webhook_id || webhook.webhook?.id || null;
+}
+
 function includedCampaigns(config, campaigns) {
   const included = list(process.env.SMARTLEAD_INCLUDED_CAMPAIGN_MATCH, "AI").map((item) => item.toLowerCase());
   const excluded = list(process.env.SMARTLEAD_EXCLUDED_STATUSES, "PAUSED,COMPLETED,ARCHIVED").map((item) => item.toUpperCase());
@@ -97,8 +118,7 @@ async function main() {
   const categories = Array.isArray(categoriesData) ? categoriesData : categoriesData.data || [];
   const positiveCategories = categories.filter((category) => {
     const sentiment = String(category.sentiment_type || "").toLowerCase();
-    const name = String(category.name || "");
-    return sentiment === "positive" || /interested|meeting/i.test(name);
+    return sentiment === "positive";
   });
   if (positiveCategories.length === 0) throw new Error("No positive Smartlead categories found");
   const categoryIdMap = Object.fromEntries(positiveCategories.map((category) => [String(category.id), true]));
@@ -132,24 +152,39 @@ async function main() {
     } catch {
       existing = [];
     }
-    const alreadyConfigured = existing.some((webhook) => String(webhook.webhook_url || "").includes("/webhooks/smartlead"));
-    if (alreadyConfigured) {
-      console.log(JSON.stringify({ campaignId: id, campaign: name, status: "skipped", reason: "existing webhook" }));
-      continue;
-    }
-
     const body = {
       name: WEBHOOK_NAME,
       webhook_url: webhookUrl,
       association_type: "campaign",
       email_campaign_id: id,
       event_type_map: {
-        EMAIL_REPLY: true,
         LEAD_CATEGORY_UPDATED: true
       },
       category_id_map: categoryIdMap,
       force_create: false
     };
+
+    const configuredWebhook = existing.find((webhook) => String(webhook.webhook_url || "").includes("/webhooks/smartlead"));
+    if (configuredWebhook) {
+      const webhookId = existingWebhookId(configuredWebhook);
+      if (!webhookId) {
+        console.log(JSON.stringify({ campaignId: id, campaign: name, status: "skipped", reason: "existing webhook missing id" }));
+        continue;
+      }
+      if (dryRun) {
+        console.log(JSON.stringify({ campaignId: id, campaign: name, status: "would_update", webhookId }));
+        continue;
+      }
+      const result = await smartleadPut(baseUrl, apiKey, `webhook/update/${webhookId}`, body);
+      console.log(JSON.stringify({
+        campaignId: id,
+        campaign: name,
+        status: "updated",
+        webhookId: webhookIdFromResponse(result) || webhookId,
+        ok: result.ok ?? result.success ?? true
+      }));
+      continue;
+    }
 
     if (dryRun) {
       console.log(JSON.stringify({ campaignId: id, campaign: name, status: "would_create" }));
