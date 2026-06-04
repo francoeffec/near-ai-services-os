@@ -109,6 +109,13 @@ class Repository {
     return this.upsert(SHEETS.events, "Event ID", key, row);
   }
 
+  async findEventById(eventId) {
+    const key = cleanText(eventId);
+    if (!key) return null;
+    const table = await this.read(SHEETS.events);
+    return table.rows.find((row) => String(row["Event ID"] || "") === key) || null;
+  }
+
   async findDealByCompany(company) {
     const needle = String(company || "").trim().toLowerCase();
     const table = await this.read(SHEETS.deals);
