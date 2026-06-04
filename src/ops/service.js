@@ -233,11 +233,11 @@ class OpsService {
     const row = result.row || {};
     const reply = truncate(input.replySummary || input.notes || row.Notes);
     const lines = [
-      `${result.created ? "Created" : "Updated"} lead from Smartlead positive reply: *${row.Company || "Unknown company"}*`,
+      `New positive Smartlead reply: *${row.Company || "Unknown company"}*`,
       `Contact: ${contactText(row)}`,
       `Campaign: ${row.Campaign || "Not captured"}`,
-      `Stage: ${row["Lead Stage"] || "Replied Positive"}`,
-      reply ? `Reply: ${reply}` : ""
+      reply ? `Reply: ${reply}` : "",
+      `Tracker: ${result.created ? "Created" : "Updated"} lead, stage ${row["Lead Stage"] || "Replied Positive"}.`
     ].filter(Boolean);
     return this.postAiLeadsNotification(lines.join("\n"));
   }
