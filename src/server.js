@@ -1,7 +1,7 @@
 const express = require("express");
 const { extractionStatus } = require("./config");
 const { bootstrapSpreadsheet } = require("./sheets/bootstrap");
-const { bookingIncluded, normalizeBooking } = require("./integrations/booking");
+const { bookingIncluded, normalizeBooking, normalizeHubSpotMeeting } = require("./integrations/booking");
 const { normalizeFathomPayload, fetchFathomTranscript } = require("./integrations/fathom");
 const { verifyFathomWebhookSignature } = require("./integrations/fathom-webhook");
 const { campaignIncluded, isPositiveReply, normalizeSmartleadReply } = require("./integrations/smartlead");
@@ -147,6 +147,35 @@ function attachRoutes({ receiver, config, opsService, repository, sheetsClient }
       if (!deal.callBookedOn) deal.callBookedOn = new Date().toISOString();
       const result = await opsService.createDeal(deal);
       await opsService.notifyChiliPiperDeal(result, deal);
+      res.json({ ok: true, created: result.created, deal: result.row });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: error.message });
+    }
+  });
+
+  app.post("/webhooks/hubspot-meeting", async (req, res) => {
+    if (!requireSecret(config, req, res)) return;
+    try {
+      const deal = normalizeHubSpotMeeting(req.body);
+      if (await duplicateEvent(repository, deal.sourceEventId)) {
+        res.json({ ok: true, duplicate: true });
+        return;
+      }
+      if (!bookingIncluded(config, deal)) {
+        await repository.addEvent({
+          eventId: deal.sourceEventId,
+          source: "HubSpot",
+          eventType: "ignored_booking",
+          status: "ignored",
+          summary: `HubSpot meeting ignored because meeting is not included: ${deal.campaign || "unknown meeting"}`,
+          rawPayload: req.body
+        });
+        res.json({ ok: true, ignored: true, reason: "booking_not_included" });
+        return;
+      }
+      if (!deal.callBookedOn) deal.callBookedOn = new Date().toISOString();
+      const result = await opsService.createDeal(deal);
+      await opsService.notifyBookingDeal(result, "HubSpot");
       res.json({ ok: true, created: result.created, deal: result.row });
     } catch (error) {
       res.status(500).json({ ok: false, error: error.message });
