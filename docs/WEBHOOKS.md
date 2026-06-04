@@ -13,7 +13,7 @@ Endpoint:
 POST /webhooks/smartlead
 ```
 
-The adapter accepts common Smartlead-style shapes and native Smartlead webhook payloads. It creates or updates a Lead when the payload category, reply category, status, type, or sentiment contains `positive` or `interested`.
+The adapter accepts common Smartlead-style shapes and native Smartlead webhook payloads. It creates or updates a Lead only when the payload has a positive Smartlead lead category, and it rejects out-of-office, autoresponder, bounce, wrong-person, unsubscribe, and not-interested replies.
 
 Recommended setup: configure Smartlead to send category-filtered reply notifications to:
 
@@ -21,7 +21,7 @@ Recommended setup: configure Smartlead to send category-filtered reply notificat
 POST /webhooks/smartlead?secret=WEBHOOK_SHARED_SECRET&positive=true
 ```
 
-Use Smartlead's positive lead categories only. You can fetch those category IDs with Smartlead's `GET /api/v1/leads/fetch-categories` endpoint and include categories whose `sentiment_type` is `positive`, such as `Interested` or `Meeting Booked`.
+Use Smartlead's positive lead categories only. You can fetch those category IDs with Smartlead's `GET /api/v1/leads/fetch-categories` endpoint and include only categories whose `sentiment_type` is `positive`, such as `Interested`, `Information Request`, or `Meeting Booked`. Do not send raw `EMAIL_REPLY` events to this endpoint; those include out-of-office/autoresponder replies.
 
 For Smartlead's webhook create endpoint, use the pattern below. Replace the `category_id_map` keys with your account's positive category IDs:
 
@@ -32,7 +32,6 @@ For Smartlead's webhook create endpoint, use the pattern below. Replace the `cat
   "association_type": "campaign",
   "email_campaign_id": 123,
   "event_type_map": {
-    "EMAIL_REPLY": true,
     "LEAD_CATEGORY_UPDATED": true
   },
   "category_id_map": {
