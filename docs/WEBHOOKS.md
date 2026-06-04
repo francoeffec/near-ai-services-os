@@ -59,6 +59,7 @@ The lead is only written when the campaign matches `SMARTLEAD_INCLUDED_CAMPAIGN_
 - Reply text in `Notes`
 
 After the sheet update, the bot posts a short confirmation in `SLACK_AI_LEADS_CHANNEL_ID`.
+Smartlead positive-reply Slack posts mention the users configured in `SLACK_SMARTLEAD_NOTIFY_USER_IDS`, which defaults to Hector and Cami.
 
 Example:
 
