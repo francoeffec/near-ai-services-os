@@ -43,6 +43,36 @@ Example:
 }
 ```
 
+## HubSpot Meeting Bookings
+
+Endpoint:
+
+```text
+POST /webhooks/hubspot-meeting
+```
+
+Recommended setup: create a HubSpot workflow that enrolls newly booked AI Services meetings and sends a POST webhook to this endpoint. The webhook can enroll either Meeting records directly or send a custom contact-based payload with meeting fields.
+
+The booking is only written when the meeting title matches `BOOKING_EVENT_TITLE_MATCH`. Matching HubSpot meetings create or update a `Deals` row, update the matching `Leads` row to `Call Booked`, and post a short Slack confirmation in `SLACK_AI_LEADS_CHANNEL_ID`.
+
+Recommended custom request body:
+
+```json
+{
+  "event_id": "hubspot-meeting-{{ meeting.hs_object_id }}",
+  "meeting_title": "{{ meeting.hs_meeting_title }}",
+  "start_time": "{{ meeting.hs_meeting_start_time }}",
+  "booked_at": "{{ meeting.createdate }}",
+  "first_name": "{{ contact.firstname }}",
+  "last_name": "{{ contact.lastname }}",
+  "email": "{{ contact.email }}",
+  "company": "{{ company.name }}",
+  "owner_name": "Camila Bagnati"
+}
+```
+
+Use `owner_name: "Franco Pereyra"` for Franco's booking workflow. If HubSpot cannot provide owner name directly and the workflow is shared, leave `owner_name` blank; the deal will still be created and can be assigned later.
+
 ## Chili Piper / Booking Webhook
 
 Endpoint:
@@ -51,7 +81,7 @@ Endpoint:
 POST /webhooks/chili-piper
 ```
 
-Recommended setup: if Chili Piper cannot post directly, use its standard Zapier or webhook bridge and send the booking payload here. The service normalizes `booking`, `event`, `meeting`, `prospect`, `guest`, `invitee`, and `contact` fields.
+This endpoint remains available as a fallback if anyone books through Chili Piper. The service normalizes `booking`, `event`, `meeting`, `prospect`, `guest`, `invitee`, and `contact` fields.
 
 The booking is only written when the meeting/campaign title matches `BOOKING_EVENT_TITLE_MATCH`. Matching bookings create or update a `Deals` row, update the matching `Leads` row to `Call Booked`, and post a short Slack confirmation in `SLACK_AI_LEADS_CHANNEL_ID`.
 
