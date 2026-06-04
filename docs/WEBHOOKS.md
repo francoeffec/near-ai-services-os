@@ -44,6 +44,14 @@ For Smartlead's webhook create endpoint, use the pattern below. Replace the `cat
 
 Set `email_campaign_id` per AI Services campaign. The service still filters by `SMARTLEAD_INCLUDED_CAMPAIGN_MATCH`, so non-AI campaigns are ignored even if they send events.
 
+To configure matching campaign webhooks from a deployed shell using the existing environment variables, run:
+
+```bash
+node scripts/configure-smartlead-webhooks.js
+```
+
+Use `--dry-run` first if you want to preview the positive category IDs and matching campaigns without creating webhooks.
+
 The lead is only written when the campaign matches `SMARTLEAD_INCLUDED_CAMPAIGN_MATCH` and does not match an excluded campaign status. Matches can be campaign-name fragments such as `AI` or exact campaign IDs. Matching positive replies create or update the `Leads` tab with:
 
 - `Source` = `Outreach`
