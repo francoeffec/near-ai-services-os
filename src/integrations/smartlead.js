@@ -40,6 +40,58 @@ function replyTextFromPayload(payload) {
   ));
 }
 
+function categoryDetails(payload) {
+  const leadData = payload.lead_data || {};
+  const category = payload.category || leadData.category || payload.lead?.category || {};
+  const categoryName = typeof category === "string" ? category : category.name;
+  const categorySentiment = typeof category === "object" ? category.sentiment_type : "";
+  return {
+    name: cleanText(firstNonEmpty(
+      categoryName,
+      payload.category_name,
+      payload.lead_category,
+      payload.lead_category_name
+    )),
+    sentiment: cleanText(firstNonEmpty(categorySentiment, payload.sentiment_type, payload.sentiment))
+  };
+}
+
+function isNegativeOrAutomatedText(value) {
+  const text = cleanText(value).toLowerCase();
+  if (!text) return false;
+  return [
+    /\bout\s+of\s+(the\s+)?office\b/,
+    /\booo\b/,
+    /\bautomatic\s+reply\b/,
+    /\bauto(?:matic)?[-\s]?response\b/,
+    /\bauto[-\s]?reply\b/,
+    /\baway\s+from\s+(the\s+)?office\b/,
+    /\bvacation\b/,
+    /\bwill\s+(respond|reply)\s+.*\b(return|back)\b/,
+    /\bnot\s+interested\b/,
+    /\bdo\s+not\s+contact\b/,
+    /\bunsubscribe\b/,
+    /\bwrong\s+person\b/,
+    /\bbounce\b/,
+    /\buncategorizable\b/,
+    /\bnot[-\s]?positive\b/
+  ].some((pattern) => pattern.test(text));
+}
+
+function isPositiveCategory(payload) {
+  const { name, sentiment } = categoryDetails(payload);
+  if (isNegativeOrAutomatedText([name, sentiment].join(" "))) return false;
+  if (sentiment.toLowerCase() === "positive") return true;
+  return [
+    "interested",
+    "meeting request",
+    "meeting booked",
+    "information request",
+    "candidate sent - follow up",
+    "send to cold call (cv sent)"
+  ].includes(name.toLowerCase());
+}
+
 function smartleadEventId(payload) {
   return firstNonEmpty(
     payload.event_id,
@@ -64,11 +116,11 @@ function isReplyLike(payload) {
 }
 
 function isPositiveReply(payload, options = {}) {
-  if (options.assumePositive && isReplyLike(payload)) return true;
-  const leadData = payload.lead_data || {};
-  const category = payload.category || leadData.category || payload.lead?.category || {};
-  const categoryName = typeof category === "string" ? category : category.name;
-  const categorySentiment = typeof category === "object" ? category.sentiment_type : "";
+  const replyText = replyTextFromPayload(payload);
+  const { name: categoryName, sentiment: categorySentiment } = categoryDetails(payload);
+  if (isNegativeOrAutomatedText(replyText) || isNegativeOrAutomatedText(categoryName)) return false;
+  if (isPositiveCategory(payload)) return true;
+  if (options.assumePositive && !categoryName && isReplyLike(payload)) return false;
   const fields = [
     payload.category,
     categoryName,
@@ -83,7 +135,10 @@ function isPositiveReply(payload, options = {}) {
     payload.event_type,
     payload.type
   ].map((value) => String(value || "").toLowerCase());
-  return fields.some((value) => value.includes("positive") || value.includes("interested"));
+  return fields.some((value) => {
+    if (isNegativeOrAutomatedText(value)) return false;
+    return value.includes("positive") || /\binterested\b/.test(value);
+  });
 }
 
 function normalizeSmartleadReply(payload) {
