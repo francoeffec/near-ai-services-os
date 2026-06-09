@@ -1040,7 +1040,35 @@ test("call extraction does not leak Pisteyo into other company summaries", async
   assert.match(fields.project_scope, /Support BCE South across discovery/);
   assert.doesNotMatch(fields.project_scope, /Pisteyo/);
   assert.doesNotMatch(fields.notes, /Pisteyo/);
-  assert.match(fields.key_questions, /roles beyond AI/);
+  assert.doesNotMatch(fields.key_questions, /roles beyond AI|everybody doing/i);
+});
+
+test("call extraction drops small talk from key questions", async () => {
+  const transcript = [
+    "Call title: AI Automation // Fit4Travel + Near",
+    "Company: Fit4Travel",
+    "Company domain: fit4travel.com",
+    "@0:00 - Doug",
+    "Do you support roles beyond AI, such as accounting, admin, IT, and operations?",
+    "@0:20 - Doug",
+    "How have you been though?",
+    "@0:30 - Doug",
+    "You'll have the World Cup to warm you up, you know?",
+    "@1:00 - Doug",
+    "How would an AI workflow be mapped, built, and rolled out to employees?",
+    "@1:30 - Doug",
+    "What is the all-in cost for a fractional AI engineer?",
+    "@2:00 - Camila Bagnati (Near)",
+    "We usually run an engineer input call and pricing is $70 per hour all-in."
+  ].join("\n");
+
+  const fields = await extractCallFields({ ai: { apiKey: "" } }, transcript);
+
+  assert.equal(fields.company, "Fit4Travel");
+  assert.match(fields.key_questions, /AI workflow.*mapped, built, and rolled out/i);
+  assert.match(fields.key_questions, /all-in.*cost/i);
+  assert.doesNotMatch(fields.key_questions, /World Cup|How have you been|roles beyond AI|accounting|admin|operations/i);
+  assert.doesNotMatch(fields.notes, /World Cup|How have you been|roles beyond AI|accounting|admin|operations/i);
 });
 
 test("normalization rejects transcript-like and unsafe AI fields", () => {
@@ -1093,6 +1121,28 @@ test("normalization rejects vague AI next steps in favor of concrete fallback ac
   assert.match(normalized.next_steps, /Near to send information/);
   assert.match(normalized.next_steps, /Prospect to review/);
   assert.doesNotMatch(normalized.next_steps, /touch base|Continue the conversation/i);
+});
+
+test("normalization filters non-deal key questions from AI output", () => {
+  const normalized = normalizeCallFields(
+    {
+      deal_stage: "Considering",
+      key_questions: [
+        "Do you support roles beyond AI, such as accounting, admin, IT, and operations?",
+        "How have you been though?",
+        "You'll have the World Cup to warm you up, you know?",
+        "How would an AI workflow be mapped, built, and rolled out to employees?"
+      ].join("\n")
+    },
+    {
+      deal_stage: "Considering",
+      key_questions: "What is the all-in hourly cost?"
+    }
+  );
+
+  assert.match(normalized.key_questions, /AI workflow/);
+  assert.doesNotMatch(normalized.key_questions, /World Cup|How have you been|roles beyond AI|accounting|admin|operations/i);
+  assert.doesNotMatch(normalized.notes, /World Cup|How have you been|roles beyond AI|accounting|admin|operations/i);
 });
 
 test("Fathom Slack replies use extracted summary over row fallbacks", async () => {
