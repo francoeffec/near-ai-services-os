@@ -46,6 +46,7 @@ class ScriptSheetsClient {
     this.spreadsheetId = spreadsheetId;
     this.scriptWebAppUrl = scriptWebAppUrl;
     this.scriptSharedSecret = scriptSharedSecret;
+    this.metadataPromise = null;
   }
 
   async request(action, payload = {}) {
@@ -76,6 +77,26 @@ class ScriptSheetsClient {
     return this.request("getMetadata");
   }
 
+  async getCachedMetadata() {
+    if (!this.metadataPromise) {
+      this.metadataPromise = this.getMetadata();
+    }
+    return this.metadataPromise;
+  }
+
+  async safeReadRange(sheetName, range) {
+    if (range !== "A:ZZ") return range;
+    try {
+      const metadata = await this.getCachedMetadata();
+      const sheet = (metadata.sheets || []).find((candidate) => candidate.properties?.title === sheetName);
+      const columnCount = Number(sheet?.properties?.gridProperties?.columnCount);
+      if (columnCount > 0) return `A:${columnLetter(columnCount - 1)}`;
+    } catch (_error) {
+      return "A:AD";
+    }
+    return "A:AD";
+  }
+
   async ensureSheets(sheetNames) {
     return this.request("ensureSheets", { sheetNames });
   }
@@ -86,7 +107,8 @@ class ScriptSheetsClient {
   }
 
   async getValues(sheetName, range = "A:ZZ") {
-    return this.request("getValues", { sheetName, range });
+    const safeRange = await this.safeReadRange(sheetName, range);
+    return this.request("getValues", { sheetName, range: safeRange });
   }
 
   async updateValues(sheetName, startCell, values) {
