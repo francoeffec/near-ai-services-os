@@ -287,6 +287,69 @@ class OpsService {
     return result;
   }
 
+  async removePipelineRecords(input) {
+    const wantsLead = input.removeLead !== false;
+    const wantsDeal = input.removeDeal !== false;
+    const identity = {
+      company: input.company || input.Company,
+      companyDomain: input.companyDomain || input["Company Domain"],
+      email: input.email || input.Email
+    };
+    if (!cleanText(identity.company) && !cleanText(identity.companyDomain) && !cleanText(identity.email)) {
+      throw new Error("Which company should I remove?");
+    }
+
+    const deal = wantsDeal ? await this.resolveDeal(identity) : null;
+    const leadLookup = deal
+      ? {
+        ...identity,
+        company: identity.company || deal.Company,
+        companyDomain: identity.companyDomain || deal["Company Domain"],
+        email: identity.email || deal.Email
+      }
+      : identity;
+    const lead = wantsLead ? await this.resolveLead(leadLookup) : null;
+    if (!deal && !lead) {
+      throw new Error(`Could not find a matching lead or deal for ${identity.company || identity.email || identity.companyDomain}.`);
+    }
+
+    if (deal?._rowNumber && this.repository.clearRowByNumber) {
+      await this.repository.clearRowByNumber(SHEETS.deals, deal._rowNumber);
+    }
+    if (lead?._rowNumber && this.repository.clearRowByNumber) {
+      await this.repository.clearRowByNumber(SHEETS.leads, lead._rowNumber);
+    }
+
+    const company = firstNonEmpty(deal?.Company, lead?.Company, identity.company, identity.email, identity.companyDomain);
+    const removed = [
+      deal ? "deal" : "",
+      lead ? "lead" : ""
+    ].filter(Boolean);
+    const missing = [
+      wantsDeal && !deal ? "deal" : "",
+      wantsLead && !lead ? "lead" : ""
+    ].filter(Boolean);
+    const key = deal?.["Entity Key"] || lead?.["Entity Key"] || entityKey(identity);
+
+    await this.repository.addEvent?.({
+      eventId: input.sourceEventId || stableId("event", `remove:${key}:${nowIso()}`),
+      source: eventSource(input),
+      eventType: "pipeline_removed",
+      entityKey: key,
+      status: "processed",
+      summary: `Removed ${removed.join(" and ")} for ${company}`,
+      rawPayload: {
+        ...input,
+        removed,
+        missing,
+        dealRowNumber: deal?._rowNumber || "",
+        leadRowNumber: lead?._rowNumber || ""
+      }
+    });
+
+    return { company, deal, lead, removed, missing };
+  }
+
   async updateDealFromCall(input) {
     const suppliedTranscript = input.transcriptText || "";
     const suppliedSummary = firstNonEmpty(input.summaryText, input.summary, input.defaultSummary, input.default_summary);
@@ -501,6 +564,18 @@ class OpsService {
     }
     if (input.company || input.Company) {
       return this.repository.findDealByCompany(input.company || input.Company);
+    }
+    return null;
+  }
+
+  async resolveLead(input) {
+    if (input["Lead ID"]) return input;
+    if ((input.email || input.Email || input.companyDomain || input.company) && this.repository.findLeadByKey) {
+      const byKey = await this.repository.findLeadByKey(input);
+      if (byKey) return byKey;
+    }
+    if ((input.company || input.Company) && this.repository.findLeadByCompany) {
+      return this.repository.findLeadByCompany(input.company || input.Company);
     }
     return null;
   }
