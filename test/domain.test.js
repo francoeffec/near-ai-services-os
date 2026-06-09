@@ -1071,6 +1071,47 @@ test("call extraction drops small talk from key questions", async () => {
   assert.doesNotMatch(fields.notes, /World Cup|How have you been|roles beyond AI|accounting|admin|operations/i);
 });
 
+test("call extraction grounds Fit4Travel recap in the deal discussion", async () => {
+  const transcript = [
+    "Call title: AI Automation // Fit4Travel + Near",
+    "Company: Fit4Travel",
+    "0:28 - Doug",
+    "How have you been though?",
+    "0:39 - Doug",
+    "You'll have the World Cup to warm you up, you know?",
+    "3:40 - Doug",
+    "The projects I was thinking about include recreating our new website and a website migration.",
+    "4:35 - Doug",
+    "Our head of marketing thinks this might be over his head and he does not have that much experience in it.",
+    "4:59 - Doug",
+    "We also thought about a web app operating system for people who run international wellness retreats and an online course built with Claude Code.",
+    "7:24 - Camila Bagnati (Near)",
+    "A good next step would be having one of our engineers scope them and suggest an amount of hours.",
+    "8:44 - Doug",
+    "The website right now and website migration is the most time-sensitive. Everything is already in GitHub and I have a doc from marketing with the full scope.",
+    "9:44 - Doug",
+    "How does the process work? Do you just place someone with us?",
+    "12:08 - Doug",
+    "Could we have an AI engineer oversee internal projects and work in tandem with the Oswaldo replacement who works 40 hours a week?",
+    "15:15 - Doug",
+    "I want to move quickly. I'll send you the doc later today.",
+    "19:59 - Doug",
+    "You'll send me the profile for the AI engineer and we can have the meeting later this week."
+  ].join("\n");
+
+  const fields = await extractCallFields({ ai: { apiKey: "" } }, transcript);
+
+  assert.equal(fields.company, "Fit4Travel");
+  assert.equal(fields.deal_stage, "Considering");
+  assert.equal(fields.hours_per_week, "");
+  assert.match(fields.need, /website rebuild\/migration/);
+  assert.match(fields.project_scope, /GitHub work and marketing team's scope doc/);
+  assert.match(fields.next_steps, /send the website scope doc/);
+  assert.match(fields.next_steps, /engineer profile/);
+  assert.doesNotMatch(fields.notes, /World Cup|How have you been|40 hours|Lost/i);
+  assert.doesNotMatch(fields.notes, /mapped, built, and rolled out to employees/i);
+});
+
 test("normalization rejects transcript-like and unsafe AI fields", () => {
   const normalized = normalizeCallFields(
     {
