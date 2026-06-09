@@ -51,13 +51,13 @@ function checkboxRule() {
   };
 }
 
-function buildValidationRequests(metadata) {
+function buildValidationRequests(metadata, headersBySheet = {}) {
   const sheetByTitle = new Map((metadata.sheets || []).map((sheet) => [sheet.properties.title, sheet]));
   const requests = [];
 
   for (const [sheetName, dropdowns] of Object.entries(BODY_DROPDOWNS)) {
     const sheet = sheetByTitle.get(sheetName);
-    const headers = SCHEMAS[sheetName] || [];
+    const headers = headersBySheet[sheetName] || SCHEMAS[sheetName] || [];
     if (!sheet || headers.length === 0) continue;
 
     const sheetId = sheet.properties.sheetId;
@@ -112,7 +112,15 @@ function buildValidationRequests(metadata) {
 
 async function applySheetValidations(sheetsClient) {
   const metadata = await sheetsClient.getMetadata();
-  const requests = buildValidationRequests(metadata);
+  const headersBySheet = {};
+  for (const sheetName of Object.keys(BODY_DROPDOWNS)) {
+    try {
+      headersBySheet[sheetName] = (await sheetsClient.readTable(sheetName)).headers;
+    } catch (_error) {
+      headersBySheet[sheetName] = SCHEMAS[sheetName] || [];
+    }
+  }
+  const requests = buildValidationRequests(metadata, headersBySheet);
   if (requests.length > 0) await sheetsClient.batchUpdate(requests);
 }
 
