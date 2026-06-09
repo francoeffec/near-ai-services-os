@@ -32,6 +32,15 @@ function tableFromValues(values) {
   return { headers, rows };
 }
 
+function summarizeProxyNonJsonResponse(text) {
+  const compact = String(text || "").replace(/\s+/g, " ").trim();
+  const title = compact.match(/<title[^>]*>(.*?)<\/title>/i)?.[1]?.replace(/\s+/g, " ").trim();
+  if (/^(?:<!doctype html>|<html[\s>])/i.test(compact)) {
+    return `Sheets proxy returned an HTML error page${title ? ` (${title})` : ""}. Check the Apps Script deployment/access, or use service-account auth.`;
+  }
+  return `Sheets proxy returned non-JSON response: ${compact.slice(0, 200)}`;
+}
+
 class ScriptSheetsClient {
   constructor({ spreadsheetId, scriptWebAppUrl, scriptSharedSecret }) {
     this.spreadsheetId = spreadsheetId;
@@ -55,7 +64,7 @@ class ScriptSheetsClient {
     try {
       data = JSON.parse(text);
     } catch (_error) {
-      throw new Error(`Sheets proxy returned non-JSON response: ${text.slice(0, 200)}`);
+      throw new Error(summarizeProxyNonJsonResponse(text));
     }
     if (!response.ok || !data.ok) {
       throw new Error(data.error || `Sheets proxy failed for ${action}`);
@@ -122,7 +131,7 @@ class SheetsClient {
 
   static async create(config) {
     if (config.sheetsApi) return new SheetsClient(config);
-    if (config.scriptWebAppUrl) return new ScriptSheetsClient(config);
+    if (!config.serviceAccountJson && config.scriptWebAppUrl) return new ScriptSheetsClient(config);
 
     const credentials = parseServiceAccount(config.serviceAccountJson);
     const auth = new google.auth.GoogleAuth({
@@ -219,4 +228,4 @@ class SheetsClient {
   }
 }
 
-module.exports = { SheetsClient, columnLetter };
+module.exports = { SheetsClient, ScriptSheetsClient, columnLetter, summarizeProxyNonJsonResponse };
