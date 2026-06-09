@@ -17,10 +17,12 @@ const STAGE_ALIASES = [
 
 function extractCompany(text) {
   const patterns = [
+    /\bfathom\s+update\s+for\s+([A-Z][A-Za-z0-9&.\-' ]{1,60}?)(?:[:.,"\n]|$)/i,
     /\bat\s+([A-Z][A-Za-z0-9&.\-' ]{1,60}?)\s*,?\s+as\s+(?:a\s+)?(?:lead|deal)\b/i,
     /\bcompany\s+(?:is|:)\s+([A-Z][A-Za-z0-9&.\-' ]{1,60}?)(?:\.|,|$)/i,
     /\b(?:company|account)\s+name\s+(?:is|:)\s+([A-Z][A-Za-z0-9&.\-' ]{1,60}?)(?:\.|,|$)/i,
     /\bassign\s+.+?\s+to\s+([A-Z][A-Za-z0-9&.\-' ]{1,60})(?:\.|,|$)/i,
+    /\b(?:remove|delete)\s+(?:this\s+)?(?:lead|deal)(?:\s+and\s+(?:lead|deal))?\s+(?:for|from)\s+([A-Z][A-Za-z0-9&.\-' ]{1,60})(?:\.|,|$)/i,
     /\b(?:add|create)\s+([A-Z][A-Za-z0-9&.\-' ]{1,60}?)\s+as\s+(?:a\s+)?(?:lead|deal)\b/i,
     /\b(?:lead|deal|company)\s+for\s+([A-Z][A-Za-z0-9&.\-' ]{1,60})(?:\.|,|$)/i,
     /\b(?:move|update)\s+([A-Z][A-Za-z0-9&.\-' ]{1,60}?)(?:\s+(?:to|using|with|for)\b|\.|,|$)/i,
@@ -196,6 +198,22 @@ function parseIntent(text) {
 
   if (/\bmove\b.*\bhandoff\b|\bhandoff\b/i.test(body)) {
     return { type: "move_to_handoff", company, stage: "Input Call", rawText: body };
+  }
+
+  if (/\b(remove|delete)\b/i.test(body) && /\b(lead|deal|tracker|record|pipeline)\b/i.test(body)) {
+    const mentionsLead = /\blead\b/i.test(body);
+    const mentionsDeal = /\bdeal\b/i.test(body);
+    const removeLead = mentionsLead || !mentionsDeal;
+    const removeDeal = mentionsDeal || !mentionsLead;
+    return {
+      type: "remove_pipeline_records",
+      company,
+      companyDomain,
+      email,
+      removeLead,
+      removeDeal,
+      rawText: body
+    };
   }
 
   if (fathomUrl || (/\bupdate\b/i.test(body) && /transcript|call notes|fathom/i.test(body))) {
