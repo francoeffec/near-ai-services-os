@@ -52,6 +52,20 @@ test("parseIntent treats raw Fathom links as call updates that can create deals"
   assert.equal(intent.autoCreateDeal, true);
 });
 
+test("parseIntent detects remove lead and deal requests", () => {
+  const ambiguous = parseIntent("remove this lead and deal");
+  assert.equal(ambiguous.type, "remove_pipeline_records");
+  assert.equal(ambiguous.removeLead, true);
+  assert.equal(ambiguous.removeDeal, true);
+  assert.equal(ambiguous.company, "");
+
+  const explicit = parseIntent("delete the deal for Fit4Travel.");
+  assert.equal(explicit.type, "remove_pipeline_records");
+  assert.equal(explicit.company, "Fit4Travel");
+  assert.equal(explicit.removeLead, false);
+  assert.equal(explicit.removeDeal, true);
+});
+
 test("parseIntent maps manual lead and deal commands into the right fields", () => {
   const intent = parseIntent([
     "<@U0B6XJ2SWUB|Near AI OS> - add lead and deal to the tracker.",
@@ -116,6 +130,24 @@ test("clarification replies complete the original thread intent", () => {
   assert.equal(intent.email, "jane@example.com");
   assert.equal(intent.nextSteps, "Franco should follow up next Friday");
   assert.doesNotMatch(intent.notes, /\s+\./);
+});
+
+test("clarification replies complete remove requests", () => {
+  const intent = buildClarifiedIntent(
+    [
+      { text: "remove this lead and deal" },
+      {
+        bot_id: "B123",
+        text: "Before I update the tracker, I need one thing: Which company should I remove?"
+      }
+    ],
+    "Fit4Travel"
+  );
+
+  assert.equal(intent.type, "remove_pipeline_records");
+  assert.equal(intent.company, "Fit4Travel");
+  assert.equal(intent.removeLead, true);
+  assert.equal(intent.removeDeal, true);
 });
 
 test("help replies in a failed thread do not replay the prior tracker action", () => {
@@ -338,6 +370,62 @@ test("manual Slack deal intent writes parsed fields to deal and lead rows", asyn
   assert.match(upserts[1].row["Next Step"], /Franco to follow up on June 15/);
 });
 
+test("remove lead and deal clears matching tracker rows", async () => {
+  const cleared = [];
+  const events = [];
+  const repository = {
+    async read(sheetName) {
+      if (sheetName === "Config") return { headers: [], rows: [] };
+      return { headers: [], rows: [] };
+    },
+    async findDealByKey() {
+      return null;
+    },
+    async findDealByCompany(company) {
+      assert.equal(company, "Fit4Travel");
+      return {
+        _rowNumber: 7,
+        "Deal ID": "deal_1",
+        "Entity Key": "fit4travel.com|doug@example.com",
+        Company: "Fit4Travel",
+        Email: "doug@example.com"
+      };
+    },
+    async findLeadByKey(input) {
+      assert.equal(input.email, "doug@example.com");
+      return {
+        _rowNumber: 5,
+        "Lead ID": "lead_1",
+        "Entity Key": "fit4travel.com|doug@example.com",
+        Company: "Fit4Travel",
+        Email: "doug@example.com"
+      };
+    },
+    async findLeadByCompany() {
+      return null;
+    },
+    async clearRowByNumber(sheetName, rowNumber) {
+      cleared.push({ sheetName, rowNumber });
+      return { cleared: true };
+    },
+    async addEvent(event) {
+      events.push(event);
+    }
+  };
+  const service = new OpsService({ repository, slackClient: null, config: { slack: {} } });
+  const text = await handleIntent({
+    intent: parseIntent("remove the lead and deal for Fit4Travel"),
+    opsService: service
+  });
+
+  assert.equal(text, "Removed deal and lead for Fit4Travel.");
+  assert.deepEqual(cleared, [
+    { sheetName: "Deals", rowNumber: 7 },
+    { sheetName: "Leads", rowNumber: 5 }
+  ]);
+  assert.equal(events[0].eventType, "pipeline_removed");
+});
+
 test("fathom transcript arrays become speaker text", () => {
   assert.equal(
     transcriptToText([{ speaker: { display_name: "Alice" }, text: "Need an AI engineer." }]),
@@ -462,6 +550,29 @@ test("repository inserts new rows into first empty sheet row", async () => {
   const result = await repository.upsert("Custom", "Entity Key", "c.com|", { Company: "C" }, "ID", "id");
   assert.equal(result.rowNumber, 4);
   assert.equal(updates[0].rowNumber, 4);
+});
+
+test("repository clears rows without deleting sheet structure", async () => {
+  const updates = [];
+  const repository = new Repository({
+    async readTable() {
+      return {
+        headers: ["ID", "Entity Key", "Company", "Updated At"],
+        rows: [
+          { _rowNumber: 2, ID: "id_1", "Entity Key": "fit4travel.com|doug@example.com", Company: "Fit4Travel", "Updated At": "Jun 9, 2026" }
+        ]
+      };
+    },
+    async updateRow(sheetName, headers, rowNumber, row) {
+      updates.push({ sheetName, headers, rowNumber, row });
+    }
+  });
+
+  const result = await repository.clearRowByNumber("Custom", 2);
+  assert.equal(result.cleared, true);
+  assert.equal(result.row.Company, "Fit4Travel");
+  assert.equal(updates[0].rowNumber, 2);
+  assert.deepEqual(updates[0].row, { ID: "", "Entity Key": "", Company: "", "Updated At": "" });
 });
 
 test("repository normalizes existing created-at timestamps on update", async () => {
@@ -1119,6 +1230,24 @@ test("inferCompanyFromThread finds company in prior Slack context", async () => 
   };
   const company = await inferCompanyFromThread({ client, channel: "C1", threadTs: "123.45" });
   assert.equal(company, "Venveo");
+});
+
+test("inferCompanyFromThread finds company from prior Fathom bot recap", async () => {
+  const client = {
+    conversations: {
+      async replies() {
+        return {
+          messages: [
+            { text: "https://fathom.video/share/DotpASwco4KaWY5xkM_Azm_xhxCUBtNx" },
+            { bot_id: "B123", text: "Fathom update for Fit4Travel: created the deal and created the lead.\n\n*Skills needed*\n- Claude, systems integration" },
+            { text: "remove this lead and deal" }
+          ]
+        };
+      }
+    }
+  };
+  const company = await inferCompanyFromThread({ client, channel: "C1", threadTs: "123.45" });
+  assert.equal(company, "Fit4Travel");
 });
 
 test("moveToHandoff does not repost when handoff already has Slack link", async () => {
