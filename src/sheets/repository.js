@@ -93,6 +93,15 @@ class Repository {
     return { row: merged, created: false };
   }
 
+  async clearRowByNumber(sheetName, rowNumber) {
+    const table = await this.read(sheetName);
+    const headers = table.headers;
+    const existing = table.rows.find((candidate) => Number(candidate._rowNumber) === Number(rowNumber)) || {};
+    const blank = Object.fromEntries(headers.map((header) => [header, ""]));
+    await this.sheets.updateRow(sheetName, headers, rowNumber, blank);
+    return { row: existing, cleared: true, rowNumber };
+  }
+
   async addEvent(event) {
     const key = event.eventId || stableId("event", JSON.stringify(event).slice(0, 5000));
     const row = {
@@ -125,6 +134,18 @@ class Repository {
   async findDealByKey(input) {
     const key = entityKey(input);
     const table = await this.read(SHEETS.deals);
+    return table.rows.find((row) => row["Entity Key"] === key);
+  }
+
+  async findLeadByCompany(company) {
+    const needle = String(company || "").trim().toLowerCase();
+    const table = await this.read(SHEETS.leads);
+    return table.rows.find((row) => String(row.Company || "").trim().toLowerCase() === needle);
+  }
+
+  async findLeadByKey(input) {
+    const key = entityKey(input);
+    const table = await this.read(SHEETS.leads);
     return table.rows.find((row) => row["Entity Key"] === key);
   }
 }
