@@ -8,6 +8,7 @@ const { diagnose, syncWeeklyMetrics, weekStart } = require("../src/ops/metrics")
 const { OpsService } = require("../src/ops/service");
 const { fetchFathomRecording, htmlTranscriptToText, parseFathomSharePage, transcriptToText } = require("../src/integrations/fathom");
 const { Repository, firstEmptyRowNumber, mergePreservingExisting } = require("../src/sheets/repository");
+const { SheetsClient, ScriptSheetsClient } = require("../src/sheets/client");
 const { buildClarifiedIntent, clarificationQuestion, handleIntent, inferCompanyFromThread, isLeadingUserMention } = require("../src/slack/app");
 const { campaignIncluded, isPositiveReply, normalizeSmartleadReply } = require("../src/integrations/smartlead");
 const { bookingIncluded, normalizeBooking, normalizeHubSpotMeeting } = require("../src/integrations/booking");
@@ -117,9 +118,26 @@ test("clarification replies complete the original thread intent", () => {
   assert.doesNotMatch(intent.notes, /\s+\./);
 });
 
+test("help replies in a failed thread do not replay the prior tracker action", () => {
+  const intent = buildClarifiedIntent(
+    [
+      {
+        text: "https://fathom.video/share/DotpASwco4KaWY5xkM_Azm_xhxCUBtNx"
+      },
+      {
+        bot_id: "B123",
+        text: "I could not complete that: Sheets proxy returned an HTML error page (Error)."
+      }
+    ],
+    "help"
+  );
+
+  assert.equal(intent.type, "help");
+});
+
 test("parseIntent maps At Company as a deal phrasing", () => {
   const intent = parseIntent([
-    "At HelloFresh, as a deal, the call was had on Thursday last week and Laurent said that he would distribute some materials with internal stakeholders.",
+    "At HelloFresh, as a deal, the call was had on May 28, 2026 and Laurent said that he would distribute some materials with internal stakeholders.",
     "We sent him a one-pager.",
     "Account executive owner is Gianluca Vendramini.",
     "The deal is considering stage."
@@ -137,7 +155,7 @@ test("clarification ignores bot error replies and keeps prior user context", () 
   const intent = buildClarifiedIntent(
     [
       {
-        text: "At HelloFresh, as a deal, the call was had on Thursday last week and Laurent said that he would distribute some materials with internal stakeholders. We sent him a one-pager. Account executive owner is Gianluca Vendramini. The deal is considering stage."
+        text: "At HelloFresh, as a deal, the call was had on May 28, 2026 and Laurent said that he would distribute some materials with internal stakeholders. We sent him a one-pager. Account executive owner is Gianluca Vendramini. The deal is considering stage."
       },
       {
         bot_id: "B123",
@@ -170,7 +188,7 @@ test("clarification replay can finish an already-open manual deal thread", () =>
   const intent = buildClarifiedIntent(
     [
       {
-        text: "At HelloFresh, as a deal, the call was had on Thursday last week and Laurent said that he would distribute some materials with internal stakeholders. We sent him a one-pager. Account executive owner is Gianluca Vendramini. The deal is considering stage."
+        text: "At HelloFresh, as a deal, the call was had on May 28, 2026 and Laurent said that he would distribute some materials with internal stakeholders. We sent him a one-pager. Account executive owner is Gianluca Vendramini. The deal is considering stage."
       },
       {
         bot_id: "B123",
@@ -1670,6 +1688,53 @@ test("environment validator accepts Apps Script sheet proxy", () => {
     smartlead: { ...config.smartlead, apiKey: "smartlead" }
   }, { requireIntegrations: true });
   assert.equal(result.ok, true);
+});
+
+test("sheets client prefers service-account auth over Apps Script proxy", async () => {
+  const serviceAccountJson = JSON.stringify({
+    type: "service_account",
+    project_id: "test",
+    private_key_id: "test",
+    private_key: "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----\n",
+    client_email: "test@test.iam.gserviceaccount.com",
+    client_id: "1",
+    token_uri: "https://oauth2.googleapis.com/token"
+  });
+
+  const client = await SheetsClient.create({
+    spreadsheetId: "sheet",
+    serviceAccountJson,
+    scriptWebAppUrl: "https://script.google.com/macros/s/example/exec",
+    scriptSharedSecret: "secret"
+  });
+
+  assert.ok(client instanceof SheetsClient);
+  assert.equal(client instanceof ScriptSheetsClient, false);
+});
+
+test("script sheets client summarizes HTML proxy errors", async () => {
+  const previousFetch = global.fetch;
+  global.fetch = async () => ({
+    ok: false,
+    async text() {
+      return "<!DOCTYPE html><html><head><title>Error</title></head><body>very long Google Apps Script error page</body></html>";
+    }
+  });
+
+  try {
+    const client = new ScriptSheetsClient({
+      spreadsheetId: "sheet",
+      scriptWebAppUrl: "https://script.google.com/macros/s/example/exec",
+      scriptSharedSecret: "secret"
+    });
+
+    await assert.rejects(
+      () => client.getValues("Leads"),
+      /Sheets proxy returned an HTML error page \(Error\)/
+    );
+  } finally {
+    global.fetch = previousFetch;
+  }
 });
 
 test("environment validator can require robust Fathom extraction", () => {
