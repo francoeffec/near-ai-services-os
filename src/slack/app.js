@@ -143,6 +143,8 @@ function isTrackerBotMessage(message = {}) {
 function buildClarifiedIntent(messages = [], replyText = "") {
   const replayMessages = messages.slice();
   const cleanReplyText = cleanText(replyText);
+  const replyIntent = parseIntent(cleanReplyText);
+  if (replyIntent.type === "help") return replyIntent;
   const lastMessageText = cleanText(replayMessages[replayMessages.length - 1]?.text);
   if (cleanReplyText && cleanReplyText !== lastMessageText) {
     replayMessages.push({ text: cleanReplyText });
@@ -301,6 +303,11 @@ function createSlackApp({ config, opsService }) {
     const combinedText = [message.text, attachedText].filter(Boolean).join("\n\nAttached transcript:\n");
     if (isLeadingUserMention(combinedText)) return;
     const threadTs = message.thread_ts || message.ts;
+    const directIntent = parseIntent(combinedText);
+    if (directIntent.type === "help") {
+      await say({ text: helpText(), thread_ts: threadTs });
+      return;
+    }
     const clarificationIntent = message.thread_ts
       ? await intentFromClarificationThread({
         client,
@@ -310,7 +317,7 @@ function createSlackApp({ config, opsService }) {
       })
       : null;
     if (!clarificationIntent && !/(add|create|update|move|assign|handoff|fathom|transcript|positive reply|interested)/i.test(combinedText)) return;
-    const intent = clarificationIntent || parseIntent(combinedText);
+    const intent = clarificationIntent || directIntent;
     if (intent.type === "unknown") return;
     if (!intent.company && intent.type === "update_deal_from_call") {
       intent.company = await inferCompanyFromThread({
