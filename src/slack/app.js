@@ -55,7 +55,8 @@ function helpText() {
     "- Drop a Fathom share URL in #ai-leads after an AI Services call.",
     "- `Update Mantra Health using this Fathom transcript: ...`",
     "- `Move CP Brands to handoff.`",
-    "- `Assign Kelvin to Apple.`"
+    "- `Assign Kelvin to Apple.`",
+    "- `Remove this lead and deal.` in a tracker thread."
   ].join("\n");
 }
 
@@ -102,6 +103,10 @@ function nextStepValue(intent) {
 }
 
 function clarificationQuestion(intent) {
+  if (intent.type === "remove_pipeline_records") {
+    if (!cleanText(intent.company) && !cleanText(intent.email) && !cleanText(intent.companyDomain)) return "Which company should I remove?";
+    return "";
+  }
   if (intent.type !== "create_deal" && intent.type !== "add_lead") return "";
   if (!cleanText(intent.company)) return "What's the company name?";
   if (!hasContact(intent)) return "Who's the main contact?";
@@ -117,6 +122,7 @@ function clarificationText(question) {
 function clarificationFieldFromQuestion(text) {
   const value = cleanText(text);
   if (/company name/i.test(value)) return "company";
+  if (/which company.*remove/i.test(value)) return "company";
   if (/main contact/i.test(value)) return "contact";
   if (/\bsource\b/i.test(value)) return "source";
   if (/next step/i.test(value)) return "nextStep";
@@ -210,6 +216,22 @@ function fathomUpdateText(result) {
   ].join("\n");
 }
 
+function needsThreadCompany(intent) {
+  return !cleanText(intent.company) && [
+    "update_deal_from_call",
+    "remove_pipeline_records",
+    "assign_owner",
+    "set_deal_stage",
+    "move_to_handoff"
+  ].includes(intent.type);
+}
+
+async function fillThreadCompany(intent, { client, channel, threadTs }) {
+  if (!needsThreadCompany(intent)) return intent;
+  intent.company = await inferCompanyFromThread({ client, channel, threadTs });
+  return intent;
+}
+
 async function handleIntent({ intent, opsService }) {
   switch (intent.type) {
     case "add_lead": {
@@ -235,6 +257,14 @@ async function handleIntent({ intent, opsService }) {
       if (!intent.company) throw new Error("Please include the company name.");
       const result = await opsService.setDealStage(intent);
       return `Moved ${result.row.Company} to ${result.row["Deal Stage"]}.`;
+    }
+    case "remove_pipeline_records": {
+      const question = clarificationQuestion(intent);
+      if (question) return clarificationText(question);
+      const result = await opsService.removePipelineRecords(intent);
+      const removedText = result.removed.length ? result.removed.join(" and ") : "records";
+      const missingText = result.missing.length ? ` I did not find a matching ${result.missing.join(" or ")}.` : "";
+      return `Removed ${removedText} for ${result.company}.${missingText}`;
     }
     case "move_to_handoff": {
       if (!intent.company) throw new Error("Please include the company name.");
@@ -284,16 +314,18 @@ function createSlackApp({ config, opsService }) {
     }
   });
 
-  app.event("app_mention", async ({ event, say }) => {
+  app.event("app_mention", async ({ event, say, client }) => {
     if (!allowed(config, { user: event.user, channel: event.channel })) return;
     const intent = parseIntent((event.text || "").replace(/<@[^>]+>/g, "").trim());
     intent.sourceEventId = `slack:${event.client_msg_id || event.ts}`;
-    intent.slackThread = `slack://${event.channel}/${event.ts}`;
+    const threadTs = event.thread_ts || event.ts;
+    intent.slackThread = `slack://${event.channel}/${threadTs}`;
     try {
+      await fillThreadCompany(intent, { client, channel: event.channel, threadTs });
       const text = await handleIntent({ intent, opsService });
-      await say({ text, thread_ts: event.thread_ts || event.ts });
+      await say({ text, thread_ts: threadTs });
     } catch (error) {
-      await say({ text: `I could not complete that: ${error.message}`, thread_ts: event.thread_ts || event.ts });
+      await say({ text: `I could not complete that: ${error.message}`, thread_ts: threadTs });
     }
   });
 
@@ -319,13 +351,7 @@ function createSlackApp({ config, opsService }) {
     if (!clarificationIntent && !/(add|create|update|move|assign|handoff|fathom|transcript|positive reply|interested)/i.test(combinedText)) return;
     const intent = clarificationIntent || directIntent;
     if (intent.type === "unknown") return;
-    if (!intent.company && intent.type === "update_deal_from_call") {
-      intent.company = await inferCompanyFromThread({
-        client,
-        channel: message.channel,
-        threadTs
-      });
-    }
+    await fillThreadCompany(intent, { client, channel: message.channel, threadTs });
     if (!intent.company && ["add_lead", "create_deal", "assign_owner", "set_deal_stage", "move_to_handoff"].includes(intent.type)) return;
     intent.sourceEventId = `slack:${message.client_msg_id || message.ts}`;
     intent.slackThread = `slack://${message.channel}/${threadTs}`;
