@@ -1,5 +1,5 @@
 const { cleanText, firstNonEmpty } = require("../domain/normalize");
-const { compactField, formatCallSummary } = require("../domain/call-summary");
+const { compactField, formatCallSummary, splitPoints } = require("../domain/call-summary");
 
 const DEAL_STAGES = new Set([
   "Cancelled",
@@ -98,7 +98,8 @@ async function extractCallFieldsWithOpenAI(config, transcriptText) {
             "The company and contact should be the external prospect, not Near.",
             "Prefer a Fathom summary/action-items section when present; use the transcript only to fill gaps.",
             "Use deal_stage only from: Cancelled, Call Booked, Unqualified, Considering, Input Call, Contract Signed, Lost, Future Need.",
-            "Capture key_questions as the most important prospect questions asked during the call, rewritten concisely.",
+            "Capture key_questions as the most important prospect questions asked about this AI Services deal: need, scope, pricing, timeline, implementation approach, tools, staffing model, skills, next steps, or buying process.",
+            "Do not include rapport, greetings, personal check-ins, sports, jokes, weather, location, or questions unrelated to the AI Services opportunity in key_questions.",
             "Keep need, pain_points, key_questions, project_scope, skills_needed, pricing, next_steps, and notes concise. Do not paste transcript lines.",
             "notes must be a human-readable TL;DR under 1400 characters with only these sections: Need, Pain points, Key questions asked, Pricing, Scope of project, Skills needed, Next steps. Use short bullets.",
             "Use empty strings when the call does not support a field. Do not invent facts."
@@ -292,11 +293,37 @@ function canonicalQuestion(question, company = "") {
   if (/what.*do we do|how.*do you go|get started|how.*works/.test(lower)) return "What is the process to get started with fractional AI support?";
   if (/either way|full[-\s]?time or part[-\s]?time|part[-\s]?time/.test(lower)) return "Can Near support both fractional and full-time AI talent?";
   if (/talent.*ai|ai.*talent|latest.*ai tools|workflows.*tools/.test(lower)) return "Do you have AI talent familiar with workflows and current AI tools?";
-  if (/do you do all kinds|accounting|admin|it\b/.test(lower)) return "Do you support roles beyond AI, such as accounting, admin, IT, and operations?";
   if (/how.*use ai|best way/.test(lower)) return "How should the company use AI in the highest-leverage way?";
   if (/what.*offer|fractional/.test(lower)) return "How does the fractional AI engineer model work?";
   if (text.length > 180) return "";
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}?`;
+}
+
+function isDealRelevantQuestion(question) {
+  const text = cleanText(question);
+  if (!text || isWeakValue(text)) return false;
+  if (/world cup|warm you up|how have you been|how are you|how'?s it going|what'?s up|weather|weekend|vacation|holiday|family|kids|soccer|football|f[uú]tbol|where are you calling from|what caught|how do you find your people|fathom/i.test(text)) {
+    return false;
+  }
+  if (/roles? beyond ai|beyond ai|accounting,?\s+admin|admin,?\s+it|all kinds of different employee|everybody doing what they'?re supposed to do/i.test(text)) {
+    return false;
+  }
+  return /\b(ai|automation|workflow|tool|tools|agent|agents|engineers?|engineering|talent|hire|hiring|employees?|freelancers?|staffing|full[-\s]?time|part[-\s]?time|fractional|cost|pricing|rate|hour|hours|compensation|salary|model|engagement|process|get started|next step|move forward|build|built|roll(?:ed)? out|scope|project|implementation|integrat|systems?|crm|employee[-\s]?facing|claude|n8n|make|zapier|airtable|supabase|api|apis|mcp|use cases?|discovery|estimate|estimating|scoping|proof of concept|poc|timeline|start date|buying process)\b/i.test(text);
+}
+
+function normalizeQuestionForSummary(value) {
+  const text = cleanText(value)
+    .replace(/^[-*\u2022]\s*/, "")
+    .replace(/\s*\?+\s*$/g, "");
+  if (!text || text.length > 220) return "";
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}?`;
+}
+
+function sanitizeKeyQuestions(value, max = 5) {
+  const questions = splitPoints(value, max * 3)
+    .map(normalizeQuestionForSummary)
+    .filter(isDealRelevantQuestion);
+  return pointList(questions, max);
 }
 
 function keyQuestionsFromTurns(turns, company = "") {
@@ -324,10 +351,9 @@ function keyQuestionsFromTurns(turns, company = "") {
     /fractional and full-time ai talent/i,
     /ai talent familiar/i,
     /process to get started/i,
-    /fractional ai engineer model/i,
-    /roles beyond ai/i
+    /fractional ai engineer model/i
   ];
-  const cleaned = questions.filter((question) => question && !/where are you calling from|what caught|how do you find your people|work with hr|fathom/i.test(question));
+  const cleaned = questions.filter(isDealRelevantQuestion);
   const ranked = [...new Set(cleaned)].sort((a, b) => {
     const rank = (value) => {
       const index = priority.findIndex((pattern) => pattern.test(value));
@@ -567,6 +593,10 @@ function heuristicCallExtraction(text) {
 }
 
 function normalizeCallFields(fields = {}, fallbackFields = {}) {
+  const keyQuestions = firstNonEmpty(
+    sanitizeKeyQuestions(fields.key_questions),
+    sanitizeKeyQuestions(fallbackFields.key_questions)
+  );
   const normalized = {
     ...fields,
     company: chooseField(fields.company, fallbackFields.company),
@@ -576,7 +606,7 @@ function normalizeCallFields(fields = {}, fallbackFields = {}) {
     deal_stage: chooseDealStage(fields.deal_stage, fallbackFields.deal_stage),
     need: compactField(chooseField(fields.need || fields.project_scope, fallbackFields.need || fallbackFields.project_scope, { need: true }), 3, 520),
     pain_points: compactField(chooseField(fields.pain_points, fallbackFields.pain_points), 3, 520),
-    key_questions: compactField(chooseField(fields.key_questions, fallbackFields.key_questions), 5, 700),
+    key_questions: compactField(keyQuestions, 5, 700),
     pricing: compactField(chooseField(fields.pricing, fallbackFields.pricing), 4, 520),
     hours_per_week: chooseField(fields.hours_per_week, fallbackFields.hours_per_week),
     engineer_type: chooseField(fields.engineer_type, fallbackFields.engineer_type),
