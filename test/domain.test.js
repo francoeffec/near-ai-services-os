@@ -578,6 +578,42 @@ test("bootstrap validations clear stale text-column dropdowns and reapply by hea
   assert.equal(handoffRecapCheckbox.setDataValidation.rule.condition.type, "BOOLEAN");
 });
 
+test("bootstrap validations follow live header order when columns move", () => {
+  const requests = buildValidationRequests({
+    sheets: [
+      { properties: { title: "Deals", sheetId: 639364026, gridProperties: { rowCount: 1000 } } }
+    ]
+  }, {
+    Deals: [
+      "Deal ID",
+      "Entity Key",
+      "Company",
+      "Company Domain",
+      "First Name",
+      "Last Name",
+      "Email",
+      "Source",
+      "Campaign",
+      "Deal Stage",
+      "Next Steps",
+      "Owner",
+      "Call Had Date"
+    ]
+  });
+
+  const ownerDropdown = requests.find((request) => {
+    const update = request.setDataValidation;
+    return update?.rule && update.range.sheetId === 639364026 && update.range.startColumnIndex === 11;
+  });
+  assert.equal(ownerDropdown.setDataValidation.rule.condition.values[0].userEnteredValue, "=Config!$C$17:$C$25");
+
+  const nextStepsDropdown = requests.find((request) => {
+    const update = request.setDataValidation;
+    return update?.rule && update.range.sheetId === 639364026 && update.range.startColumnIndex === 10;
+  });
+  assert.equal(nextStepsDropdown, undefined);
+});
+
 test("updateDealFromCall creates a deal and lead when a Fathom call has no existing deal", async () => {
   const upserts = [];
   const events = [];
