@@ -1737,6 +1737,57 @@ test("script sheets client summarizes HTML proxy errors", async () => {
   }
 });
 
+test("script sheets client bounds default read range to sheet column count", async () => {
+  const previousFetch = global.fetch;
+  const requests = [];
+  global.fetch = async (_url, options) => {
+    const payload = JSON.parse(options.body);
+    requests.push(payload);
+    if (payload.action === "getMetadata") {
+      return {
+        ok: true,
+        async text() {
+          return JSON.stringify({
+            ok: true,
+            result: {
+              sheets: [
+                {
+                  properties: {
+                    title: "Leads",
+                    gridProperties: { columnCount: 16 }
+                  }
+                }
+              ]
+            }
+          });
+        }
+      };
+    }
+    return {
+      ok: true,
+      async text() {
+        return JSON.stringify({ ok: true, result: [["Lead ID", "Company"]] });
+      }
+    };
+  };
+
+  try {
+    const client = new ScriptSheetsClient({
+      spreadsheetId: "sheet",
+      scriptWebAppUrl: "https://script.google.com/macros/s/example/exec",
+      scriptSharedSecret: "secret"
+    });
+
+    await client.getValues("Leads");
+
+    assert.equal(requests[0].action, "getMetadata");
+    assert.equal(requests[1].action, "getValues");
+    assert.equal(requests[1].range, "A:P");
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
 test("environment validator can require robust Fathom extraction", () => {
   const config = loadConfig({ strict: false });
   const result = validateConfig({
