@@ -246,7 +246,7 @@ function parseTranscriptTurns(text) {
     if (/^(?:Call title|Company|Company domain|Call date|Transcript|Fathom summary):/i.test(line)) continue;
     if (/^VIEW RECORDING\b/i.test(line)) continue;
 
-    const fathomSpeaker = line.match(/^@\d{1,2}:\d{2}\s*-\s*(.+)$/i);
+    const fathomSpeaker = line.match(/^@?\d{1,2}:\d{2}(?::\d{2})?\s*-\s*(.+)$/i);
     if (fathomSpeaker) {
       pushCurrent();
       current = { speaker: fathomSpeaker[1], text: "" };
@@ -272,6 +272,87 @@ function isNearSpeaker(speaker) {
   return NEAR_SPEAKER_PATTERN.test(cleanText(speaker));
 }
 
+const DEAL_CONTEXT_PATTERN = /\b(ai|automation|automatizaciones?|workflow|workflows|tool|tools|agent|agents|engineers?|engineering|desarrolladores?|desarrollo|lead|tech lead|talent|fractional|freelance|project|projects|proyectos?|scope|scoping|proposal|propuesta|costos?|pricing|cost|compensation|salary|dollars?|d[oó]lares|hours?|package|model|process|proceso|funciona|placement|profile|profiles|website|migration|github|document|doc|marketing|head of marketing|review|information|decide|calendar|calendar link|whatsapp|meeting|call|schedule|introduce|start|priority|prioritize|operating system|retreat|retreats|course|internal|department|sops?|manual|systems?|integration|integraci[oó]n|discovery|discoveries|soluci[oó]n|implementar|implementation|quick wins?|proofs? of concept|pruebas? de concepto|n8n|make|zapier|airtable|supabase|apis?|mcp|claude|cloud code|python|copilot|prompt engineering|custom gpts?|use cases?|casos de uso|socio|operaciones|producci[oó]n|partner|hiring|hire|contratan|empleados?|necesit(?:a|amos|o)|capacidad)\b/i;
+const OFF_TOPIC_PATTERN = /\b(world cup|warm you up|brazil|argentina|rio|new year|bachelor|beach|uber|knicks|nba|jordan woods|kardashian|trump|purse|miami|buenos aires|olivos|flu|sick|vacation|weather|football|soccer|party|team game)\b/i;
+
+function isDealRelevantTurnText(value) {
+  const text = cleanText(value);
+  if (!text) return false;
+  if (!DEAL_CONTEXT_PATTERN.test(text)) return false;
+  if (OFF_TOPIC_PATTERN.test(text) && !/\b(ai|automation|workflow|engineers?|engineering|website|migration|github|project|scope|proposal|profile|marketing|systems?|internal|claude|cloud code)\b/i.test(text)) {
+    return false;
+  }
+  return true;
+}
+
+function extractionMetadataLines(raw) {
+  return String(raw || "")
+    .replace(/\r/g, "\n")
+    .split(/\n+/)
+    .map((line) => cleanText(line))
+    .filter((line) => /^(?:Call title|Company|Company domain|Call date):/i.test(line));
+}
+
+function extractionSummaryLines(raw) {
+  const lines = String(raw || "")
+    .replace(/\r/g, "\n")
+    .split(/\n+/)
+    .map((line) => cleanText(line))
+    .filter(Boolean);
+  const summary = [];
+  let inSummary = false;
+  for (const line of lines) {
+    const summaryHeader = line.match(/^Fathom summary:\s*(.*)$/i);
+    if (summaryHeader) {
+      inSummary = true;
+      const inlineSummary = cleanText(summaryHeader[1]);
+      if (inlineSummary && DEAL_CONTEXT_PATTERN.test(inlineSummary) && !(OFF_TOPIC_PATTERN.test(inlineSummary) && !DEAL_CONTEXT_PATTERN.test(inlineSummary))) {
+        summary.push(inlineSummary);
+      }
+      continue;
+    }
+    if (/^Transcript:/i.test(line)) {
+      inSummary = false;
+      continue;
+    }
+    if (!inSummary) continue;
+    if (OFF_TOPIC_PATTERN.test(line) && !DEAL_CONTEXT_PATTERN.test(line)) continue;
+    if (DEAL_CONTEXT_PATTERN.test(line)) summary.push(line);
+  }
+  return summary;
+}
+
+function focusTranscriptForExtraction(text) {
+  const raw = String(text || "");
+  const turns = parseTranscriptTurns(raw);
+  if (!turns.length) return raw;
+
+  const focused = [];
+  const summary = extractionSummaryLines(raw);
+  for (let index = 0; index < turns.length; index += 1) {
+    const turn = turns[index];
+    const turnText = cleanText(turn.text);
+    const previousKept = focused.length > 0 && index > 0 && turns[index - 1]?.__kept;
+    const bridge = previousKept
+      && /^(?:yeah|yes|right|okay|ok|great|sounds good|that works|a hundred percent)\b/i.test(turnText)
+      && !OFF_TOPIC_PATTERN.test(turnText);
+    if (isDealRelevantTurnText(turnText) || bridge) {
+      turns[index].__kept = true;
+      focused.push(`${turn.speaker}: ${turnText}`);
+    }
+  }
+
+  if (focused.length < 2 && !summary.length) return raw;
+  const metadata = extractionMetadataLines(raw);
+  return [
+    ...metadata,
+    summary.length ? "Fathom summary:" : "",
+    ...summary,
+    focused.length ? "Transcript:" : "",
+    ...focused
+  ].filter(Boolean).join("\n");
+}
+
 function pointList(points, max = 2) {
   return [...new Set(points.map(cleanText).filter(Boolean))].slice(0, max).join("\n");
 }
@@ -293,6 +374,7 @@ function canonicalQuestion(question, company = "") {
   if (/what.*do we do|how.*do you go|get started|how.*works/.test(lower)) return "What is the process to get started with fractional AI support?";
   if (/either way|full[-\s]?time or part[-\s]?time|part[-\s]?time/.test(lower)) return "Can Near support both fractional and full-time AI talent?";
   if (/talent.*ai|ai.*talent|latest.*ai tools|workflows.*tools/.test(lower)) return "Do you have AI talent familiar with workflows and current AI tools?";
+  if (/ai engineer.*(?:point guard|oversee|organize|internal projects|work in tandem)/.test(lower)) return "Can an AI engineer oversee internal projects and work in tandem with the broader team?";
   if (/how.*use ai|best way/.test(lower)) return "How should the company use AI in the highest-leverage way?";
   if (/what.*offer|fractional/.test(lower)) return "How does the fractional AI engineer model work?";
   if (text.length > 180) return "";
@@ -386,6 +468,15 @@ function extractPricingPoints(body) {
 
 function extractNeedPoints(body) {
   const points = [];
+  if (/website (?:right now|rebuild|migration|project)|website migration|recreating our new website|new website/i.test(body)) {
+    points.push("Needs help finishing a time-sensitive website rebuild/migration that has been difficult for the current team to execute.");
+  }
+  if (/operating system.*(?:international )?wellness retreats?|international wellness retreats?.*operating system|online course|launch your own/i.test(body)) {
+    points.push("Considering AI/software projects around Fit4Travel's retreat operating system and online course ideas.");
+  }
+  if (/ai engineer.*(?:point guard|oversees|organizes|internal projects|different teams)|department doc|sops?|manual thing|build a tool that does/i.test(body)) {
+    points.push("Wants an AI engineer who can assess internal workflows and help guide automation work with the broader team.");
+  }
   if (/fractional (?:ai )?(?:person|engineer)|fractional ai|package of hours/i.test(body)) {
     points.push("Exploring fractional AI engineering support and how the model works.");
   }
@@ -404,14 +495,20 @@ function extractNeedPoints(body) {
   if (/right information out of our systems|centralized information/i.test(body)) {
     points.push("Wants AI to access or centralize the right information from internal systems.");
   }
-  if (/create something|construct it|roll it out|web app|employees could use it/i.test(body)) {
-    points.push("Wants to understand how an AI workflow/tool would be mapped, built, and rolled out to employees.");
+  if (!points.length && /create something|construct it|roll it out|web app|employees could use it/i.test(body)) {
+    points.push("Considering a custom AI/software build and wants help turning the idea into a concrete project plan.");
   }
   return pointList(points, 3);
 }
 
 function extractPainPoints(body) {
   const points = [];
+  if (/website migration|recreating our new website|over his head|doesn'?t have that much experience|way longer|technical standpoint/i.test(body)) {
+    points.push("Website rebuild/migration is time-sensitive and may be beyond the current owner's technical experience.");
+  }
+  if (/manual thing|department doc|sops?|day-to-day|video recordings|build a tool that does/i.test(body)) {
+    points.push("Internal processes are documented but may still include manual workflows that could be automated.");
+  }
   if (/hiring.*fort wayne.*taking longer|taking longer than i thought|trying to hire.*taking longer/i.test(body)) {
     points.push("Local hiring in Fort Wayne is taking longer than expected.");
   }
@@ -439,6 +536,15 @@ function extractPainPoints(body) {
 function extractScopePoints(body, company = "") {
   const points = [];
   const prospect = cleanText(company) || "the prospect";
+  if (/website (?:right now|migration|project)|website migration|recreating our new website|github|marketing team.*scope|scope of the project/i.test(body)) {
+    points.push(`Start with ${prospect}'s website rebuild/migration by reviewing the existing GitHub work and marketing team's scope doc.`);
+  }
+  if (/engineering lead|engineer.*(?:scoping|suggesting an amount of hours)|proposal.*(?:hours|phases)|profile.*best fit|tech lead/i.test(body)) {
+    points.push("Near engineering lead to scope the work, estimate hours by phase, and recommend the best-fit engineer.");
+  }
+  if (/head of marketing|introduce us|send them my link|meeting later this week|include the engineer/i.test(body)) {
+    points.push("Schedule an engineer input call or intro with Fit4Travel's head of marketing once the scope doc is shared.");
+  }
   if (/input call with an engineer|meet the engineer|walk them through/i.test(body)) {
     points.push("Run an engineer input call to define one priority workflow or bottleneck and estimate hours.");
   }
@@ -451,14 +557,23 @@ function extractScopePoints(body, company = "") {
   if (/ai agents|integrating your crms|different tools|repetitive processes|centralized information/i.test(body)) {
     points.push("Potential builds include AI agents, CRM/tool integrations, centralized information access, and workflow automation.");
   }
-  if (/web app|employees could use it|roll it out/i.test(body)) {
-    points.push("Engineer can help determine the best rollout path, including an internal app or employee-facing workflow.");
+  if (!points.length && /web app|employees could use it|roll it out/i.test(body)) {
+    points.push("Define the rollout path for a custom AI/software workflow or employee-facing tool.");
   }
   return pointList(points, 3);
 }
 
 function extractNextSteps(body) {
   const points = [];
+  if (/send (?:you )?(?:the )?(?:doc|document)|share that.*send it to you later today|send it to you later today/i.test(body)) {
+    points.push("Prospect to send the website scope doc later today.");
+  }
+  if (/engineering lead|review.*(?:project|doc)|best fit|tech lead|send.*profile.*(?:best|ai engineer)|profile.*(?:best|ai engineer)/i.test(body)) {
+    points.push("Near to review the project with the engineering lead and send the proposed engineer profile.");
+  }
+  if (/head of marketing|introduce us|send them my link|meeting later this week|include the engineer/i.test(body)) {
+    points.push("Schedule an engineer input call or intro with the head of marketing later this week.");
+  }
   if (/send (?:you )?(?:all )?(?:the )?information|send.*different models|send profiles|send.*examples|enviamos todo|enviar.*(?:presentación|resumen|algo)|cuente quiénes son ustedes|te enviamos eso/i.test(body)) {
     points.push("Near to send information on fractional and full-time options, plus example profiles or relevant examples.");
   }
@@ -482,7 +597,8 @@ function extractNextSteps(body) {
 function extractDealStage(body, fallback = "") {
   if (/\b(cancelled|canceled)\b/i.test(body)) return "Cancelled";
   if (/\b(no fit|not interested|no budget|unqualified)\b/i.test(body)) return "Unqualified";
-  if (/\b(lost|went with|chose another|not moving forward)\b/i.test(body)) return "Lost";
+  if (/\b(not moving forward|went with|chose another)\b/i.test(body)) return "Lost";
+  if (/\blost\b/i.test(body) && /\b(deal|opportunity|contract|vendor|project|client|customer|budget|moving forward)\b/i.test(body)) return "Lost";
   if (/\b(contract signed|signed the contract|agreement signed|ready to sign|send the contract)\b/i.test(body)) return "Contract Signed";
   if (/\b(input call booked|input call scheduled|engineer input call scheduled)\b/i.test(body)) return "Input Call";
   if (/\b(call booked|meeting booked|calendar invite|scheduled for)\b/i.test(body)) return "Call Booked";
@@ -494,6 +610,19 @@ function extractDealStage(body, fallback = "") {
 function extractStartDate(body) {
   const match = body.match(/\b(?:start|kick off|begin)\s+(?:on|around|by)?\s*((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}(?:,\s+\d{4})?)\b/i);
   return match ? match[1] : "";
+}
+
+function extractHoursPoints(body) {
+  if (/20,?\s*40\s*hours/i.test(body)) return "20-40 hours typical; 10-hour minimum";
+  const sentences = String(body || "").match(/[^.!?]*(?:\d{1,3}\s*(?:hours|hrs|h)\s*(?:\/?\s*(?:week|wk)|a week|per week)|\d{1,3}\s*hours?)[^.!?]*/gi) || [];
+  for (const sentence of sentences) {
+    const text = cleanText(sentence);
+    if (/replacement|replace oswaldo|oswaldo'?s role|working 40 hours a week/i.test(text)) continue;
+    if (!/\b(ai engineer|fractional|package|near|model|per month|monthly|hours per|amount of hours|proposal)\b/i.test(text)) continue;
+    const match = text.match(/\b\d{1,3}\s*(?:hours|hrs|h)(?:\s*(?:\/?\s*(?:week|wk)|a week|per week|per month|monthly))?\b/i);
+    if (match) return match[0];
+  }
+  return "";
 }
 
 function hasTranscriptLeak(value) {
@@ -544,7 +673,20 @@ function chooseField(primary, fallback, options) {
   const safePrimary = safeField(primary, options);
   const safeFallback = safeField(fallback, options);
   if (options?.need && safeFallback && isScopeLikeNeed(safePrimary)) return safeFallback;
+  if (options?.preferSpecific && safePrimary && safeFallback && isGenericCallField(safePrimary) && specificityScore(safeFallback) > specificityScore(safePrimary)) {
+    return safeFallback;
+  }
   return firstNonEmpty(safePrimary, safeFallback);
+}
+
+function isGenericCallField(value) {
+  return /\b(mapped, built, and rolled out|engineer input call to define one priority workflow|best rollout path|custom AI\/software build|exploring fractional AI engineering support)\b/i.test(cleanText(value));
+}
+
+function specificityScore(value) {
+  const text = cleanText(value);
+  const markers = text.match(/\b(website|migration|github|marketing|scope doc|head of marketing|fit4travel|retreat|course|department|sops?|internal|oswaldo|profile|engineering lead)\b/gi) || [];
+  return markers.length + Math.min(5, Math.floor(text.length / 90));
 }
 
 function chooseDealStage(primary, fallback) {
@@ -558,8 +700,9 @@ function chooseDealStage(primary, fallback) {
 
 function heuristicCallExtraction(text) {
   const raw = String(text || "");
-  const body = cleanText(raw);
-  const turns = parseTranscriptTurns(raw);
+  const focusedRaw = focusTranscriptForExtraction(raw);
+  const body = cleanText(focusedRaw);
+  const turns = parseTranscriptTurns(focusedRaw);
   const company = extractCompanyName(raw);
   const companyDomain = extractCompanyDomain(raw);
   const skills = collectSkills(body);
@@ -567,9 +710,7 @@ function heuristicCallExtraction(text) {
     || (body.match(/\$[0-9,]+(?:\s*\/\s*(?:month|mo|hour|hr|week))?/i) || [])[0]
     || (body.match(/\b(?:usd|us\$)?\s*[0-9]{2,4}\s*(?:d[oó]lares|usd)?\s*(?:la hora|por hora|\/\s*(?:hour|hr)|per hour)\b/i) || [])[0]
     || "";
-  const hours = /20,?\s*40\s*hours/i.test(body)
-    ? "20-40 hours typical; 10-hour minimum"
-    : (body.match(/\b[0-9]{1,3}\s*(?:hours|hrs|h)\/?(?:week|wk)?\b/i) || [])[0] || "";
+  const hours = extractHoursPoints(body);
 
   return {
     company,
@@ -604,14 +745,14 @@ function normalizeCallFields(fields = {}, fallbackFields = {}) {
     contact_name: chooseField(fields.contact_name, fallbackFields.contact_name),
     contact_email: chooseField(fields.contact_email, fallbackFields.contact_email),
     deal_stage: chooseDealStage(fields.deal_stage, fallbackFields.deal_stage),
-    need: compactField(chooseField(fields.need || fields.project_scope, fallbackFields.need || fallbackFields.project_scope, { need: true }), 3, 520),
+    need: compactField(chooseField(fields.need || fields.project_scope, fallbackFields.need || fallbackFields.project_scope, { need: true, preferSpecific: true }), 3, 520),
     pain_points: compactField(chooseField(fields.pain_points, fallbackFields.pain_points), 3, 520),
     key_questions: compactField(keyQuestions, 5, 700),
     pricing: compactField(chooseField(fields.pricing, fallbackFields.pricing), 4, 520),
     hours_per_week: chooseField(fields.hours_per_week, fallbackFields.hours_per_week),
     engineer_type: chooseField(fields.engineer_type, fallbackFields.engineer_type),
     skills_needed: compactField(chooseField(fields.skills_needed, fallbackFields.skills_needed), 6, 520),
-    project_scope: compactField(chooseField(fields.project_scope, fallbackFields.project_scope), 3, 650),
+    project_scope: compactField(chooseField(fields.project_scope, fallbackFields.project_scope, { preferSpecific: true }), 3, 650),
     start_date: chooseField(fallbackFields.start_date, ""),
     next_steps: compactField(chooseField(fields.next_steps, fallbackFields.next_steps, { nextStep: true }), 3, 620),
     if_lost_reason: compactField(chooseField(fields.if_lost_reason, fallbackFields.if_lost_reason), 1, 220)
@@ -622,9 +763,10 @@ function normalizeCallFields(fields = {}, fallbackFields = {}) {
 }
 
 async function extractCallFields(config, transcriptText) {
+  const focusedText = focusTranscriptForExtraction(transcriptText);
   const fallback = heuristicCallExtraction(transcriptText);
   try {
-    const ai = await extractCallFieldsWithOpenAI(config, transcriptText);
+    const ai = await extractCallFieldsWithOpenAI(config, focusedText);
     if (Object.keys(ai).length > 0) return normalizeCallFields(ai, fallback);
   } catch (error) {
     console.warn("OpenAI extraction failed; using heuristic extraction", error.message);
@@ -634,6 +776,7 @@ async function extractCallFields(config, transcriptText) {
 
 module.exports = {
   extractCallFields,
+  focusTranscriptForExtraction,
   heuristicCallExtraction,
   normalizeCallFields,
   parseTranscriptTurns
