@@ -18,6 +18,7 @@ const { shouldRunMetrics } = require("../src/jobs/scheduler");
 const { buildValidationRequests } = require("../src/sheets/bootstrap");
 const { extractCallFields, normalizeCallFields } = require("../src/ai/extract");
 const { verifyFathomWebhookSignature } = require("../src/integrations/fathom-webhook");
+const { buildDocumentSearchQuery, extractGoogleDocId, flattenGoogleDoc, searchKeywords } = require("../src/integrations/google-docs");
 
 test("entityKey uses domain and normalized email", () => {
   assert.equal(entityKey({ companyDomain: "https://www.Apple.com/path", email: " Jane@Apple.com " }), "apple.com|jane@apple.com");
@@ -1981,6 +1982,80 @@ test("environment validator accepts Apps Script sheet proxy", () => {
     smartlead: { ...config.smartlead, apiKey: "smartlead" }
   }, { requireIntegrations: true });
   assert.equal(result.ok, true);
+});
+
+test("environment validator can require Google Docs service account auth", () => {
+  const config = loadConfig({ strict: false });
+  const result = validateConfig({
+    ...config,
+    google: {
+      spreadsheetId: "sheet",
+      serviceAccountJson: "",
+      scriptWebAppUrl: "https://script.google.com/macros/s/example/exec",
+      scriptSharedSecret: "secret"
+    },
+    slack: { ...config.slack, botToken: "xoxb-token", signingSecret: "signing", aiLeadsChannelId: "C1" },
+    ai: { ...config.ai, apiKey: "openai" },
+    webhookSharedSecret: "webhook",
+    adminToken: "admin"
+  }, { requireGoogleDocs: true });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.missing, ["GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_SERVICE_ACCOUNT_JSON_B64"]);
+});
+
+test("Google Doc helpers extract IDs and flatten document text", () => {
+  assert.equal(
+    extractGoogleDocId("https://docs.google.com/document/d/1PFR8iSbGrfnVkJIp63-Sur8V2ynPv_40hqNXPYmvtc0/edit?tab=t.0"),
+    "1PFR8iSbGrfnVkJIp63-Sur8V2ynPv_40hqNXPYmvtc0"
+  );
+  assert.equal(extractGoogleDocId("1abcDEF_12345678901234567890"), "1abcDEF_12345678901234567890");
+
+  const flattened = flattenGoogleDoc({
+    title: "6-Month SEO Strategic Plan",
+    tabs: [
+      {
+        tabProperties: { tabId: "t.0", title: "Main" },
+        documentTab: {
+          body: {
+            content: [
+              {
+                paragraph: {
+                  elements: [
+                    { textRun: { content: "My thesis\n" } }
+                  ]
+                }
+              },
+              {
+                table: {
+                  tableRows: [
+                    {
+                      tableCells: [
+                        { content: [{ paragraph: { elements: [{ textRun: { content: "Phase\n" } }] } }] },
+                        { content: [{ paragraph: { elements: [{ textRun: { content: "What ships\n" } }] } }] }
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    ]
+  });
+
+  assert.equal(flattened.title, "6-Month SEO Strategic Plan");
+  assert.deepEqual(flattened.paragraphs, ["Main", "My thesis", "Phase | What ships"]);
+  assert.match(flattened.text, /My thesis/);
+});
+
+test("Google Doc search query uses stable keywords for Drive fallback", () => {
+  assert.deepEqual(searchKeywords("Review Andres' 6-mo SEO plan"), ["andres", "seo", "plan"]);
+  const query = buildDocumentSearchQuery("Review Andres' 6-mo SEO plan");
+  assert.match(query, /mimeType = 'application\/vnd\.google-apps\.document'/);
+  assert.match(query, /fullText contains 'andres'/);
+  assert.match(query, /fullText contains 'seo'/);
 });
 
 test("sheets client prefers service-account auth over Apps Script proxy", async () => {
