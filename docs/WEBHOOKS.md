@@ -5,6 +5,11 @@ All external webhooks must include either:
 - `?secret=WEBHOOK_SHARED_SECRET`
 - `x-near-ai-secret: WEBHOOK_SHARED_SECRET`
 
+Admin endpoints must include either:
+
+- `?token=ADMIN_TOKEN`
+- `x-admin-token: ADMIN_TOKEN`
+
 ## Smartlead Positive Replies
 
 Endpoint:
@@ -173,3 +178,31 @@ Example:
   ]
 }
 ```
+
+## Google Doc Body Fetch
+
+Endpoint:
+
+```text
+POST /admin/google-docs/fetch
+```
+
+This endpoint lets Hermes or another internal agent retrieve the actual body text behind a Google Doc URL returned from Monday or another task system. It is admin-protected and does not write to the sheet.
+
+Example:
+
+```json
+{
+  "url": "https://docs.google.com/document/d/1PFR8iSbGrfnVkJIp63-Sur8V2ynPv_40hqNXPYmvtc0/edit",
+  "query": "Review Andres SEO plan",
+  "maxChars": 100000
+}
+```
+
+The service first tries the document ID from the URL. If that fails and `query` or `title` is present, it searches accessible Google Docs through Drive and reads the best match.
+
+Required Google setup:
+
+- Google Docs API enabled.
+- Google Drive API enabled.
+- Service account shared into the target doc or parent folder, or a future OAuth/domain-wide-delegation flow for arbitrary user docs.
