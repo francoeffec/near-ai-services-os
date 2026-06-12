@@ -21,6 +21,7 @@ The app exposes:
 - `POST /webhooks/hubspot-meeting`
 - `POST /webhooks/chili-piper`
 - `POST /webhooks/fathom`
+- `POST /admin/google-docs/fetch`
 - `POST /jobs/weekly-metrics`
 
 ## 2. Required Secrets
@@ -53,15 +54,24 @@ SLACK_ALLOWED_USER_IDS=
 SLACK_ALLOWED_CHANNEL_IDS=C0B63R2TC3V
 ```
 
-## 3. Google Sheets Access
+## 3. Google Access
 
 - Share the spreadsheet with the Google service account email as editor.
+- Enable Google Sheets API, Google Docs API, and Google Drive API on the service account's Google Cloud project.
+- Share Google Docs or parent folders that Hermes should read with the Google service account email as viewer.
 - Run `npm run validate:env` before starting the service.
+- Run `node scripts/validate-env.js --require-google-docs` if Google Doc body retrieval is required in this environment.
 - After deploy, visit `/readyz`.
 - Expected response:
 
 ```json
-{ "ok": true, "sheet": "ready" }
+{ "ok": true, "sheet": "ready", "googleDocs": { "configured": true } }
+```
+
+Smoke-test Google Doc retrieval after deploy:
+
+```bash
+node scripts/smoke-deploy.js https://YOUR_HOST ADMIN_TOKEN --require-google-docs --google-doc-url=https://docs.google.com/document/d/DOCUMENT_ID/edit
 ```
 
 ## 4. Slack App Setup
