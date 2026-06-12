@@ -4,6 +4,7 @@ const { bootstrapSpreadsheet } = require("./sheets/bootstrap");
 const { bookingIncluded, normalizeBooking, normalizeHubSpotMeeting } = require("./integrations/booking");
 const { normalizeFathomPayload, fetchFathomTranscript } = require("./integrations/fathom");
 const { verifyFathomWebhookSignature } = require("./integrations/fathom-webhook");
+const { fetchGoogleDocContent } = require("./integrations/google-docs");
 const { campaignIncluded, isPositiveReply, normalizeSmartleadReply } = require("./integrations/smartlead");
 const { syncWeeklyMetrics } = require("./ops/metrics");
 
@@ -68,9 +69,27 @@ function attachRoutes({ receiver, config, opsService, repository, sheetsClient }
         repository.read("Events"),
         repository.read("Config")
       ]);
-      res.json({ ok: true, sheet: "ready", extraction: extractionStatus(config) });
+      res.json({
+        ok: true,
+        sheet: "ready",
+        extraction: extractionStatus(config),
+        googleDocs: {
+          configured: Boolean(config.google.serviceAccountJson),
+          auth: config.google.serviceAccountJson ? "service_account" : "unavailable"
+        }
+      });
     } catch (error) {
       res.status(503).json({ ok: false, error: error.message });
+    }
+  });
+
+  app.post("/admin/google-docs/fetch", async (req, res) => {
+    if (!requireAdmin(config, req, res)) return;
+    try {
+      const result = await fetchGoogleDocContent(config.google, req.body || {});
+      res.json({ ok: true, ...result });
+    } catch (error) {
+      res.status(500).json({ ok: false, error: error.message });
     }
   });
 
