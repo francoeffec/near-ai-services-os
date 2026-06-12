@@ -143,7 +143,36 @@ function isTrackerBotMessage(message = {}) {
   const text = cleanText(message.text || "");
   if (!text) return true;
   if (message.bot_id || message.subtype === "bot_message") return true;
-  return /^(?:Before I update the tracker|I could not confidently map|I could not complete that|Fathom update for|Created lead:|Updated lead:|Created deal:|Updated deal:|Moved .+ to|Assigned .+ to)/i.test(text);
+  return /^(?:Before I update the tracker|I could not confidently map|I could not complete that|Fathom update for|New positive Smartlead reply:|Created lead:|Updated lead:|Created deal:|Updated deal:|Moved .+ to|Assigned .+ to)/i.test(text);
+}
+
+function smartleadCorrectionIntent(messages = [], replyText = "") {
+  const correction = cleanText(replyText);
+  if (!/\b(?:not|isn'?t|wasn'?t)\s+(?:a\s+)?positive\b|\bfalse\s+positive\b|\bwrongly\s+marked\s+positive\b/i.test(correction)) return null;
+
+  const smartleadMessage = messages
+    .slice()
+    .reverse()
+    .map((message) => cleanText(message.text))
+    .find((text) => /^New positive Smartlead reply:/i.test(text));
+  if (!smartleadMessage) return null;
+
+  const companyMatch = smartleadMessage.match(/^New positive Smartlead reply:\s*\*([^*]+)\*/i)
+    || smartleadMessage.match(/^New positive Smartlead reply:\s*([^:\n]+?)(?:\s+cc:|\s+Contact:|\n|$)/i);
+  const emailMatch = smartleadMessage.match(/<([^<>\s@]+@[^<>\s@]+\.[^<>\s@]+)>/)
+    || smartleadMessage.match(/\b([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})\b/i);
+  const company = cleanText(companyMatch?.[1]).replace(/[.,;:]+$/g, "");
+  const email = cleanText(emailMatch?.[1]);
+  if (!company && !email) return null;
+
+  return {
+    type: "remove_pipeline_records",
+    company,
+    email,
+    removeLead: true,
+    removeDeal: false,
+    rawText: correction
+  };
 }
 
 function buildClarifiedIntent(messages = [], replyText = "") {
@@ -151,6 +180,8 @@ function buildClarifiedIntent(messages = [], replyText = "") {
   const cleanReplyText = cleanText(replyText);
   const replyIntent = parseIntent(cleanReplyText);
   if (replyIntent.type === "help") return replyIntent;
+  const correctionIntent = smartleadCorrectionIntent(replayMessages, cleanReplyText);
+  if (correctionIntent) return correctionIntent;
   const lastMessageText = cleanText(replayMessages[replayMessages.length - 1]?.text);
   if (cleanReplyText && cleanReplyText !== lastMessageText) {
     replayMessages.push({ text: cleanReplyText });
