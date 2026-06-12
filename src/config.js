@@ -74,7 +74,7 @@ function loadConfig({ strict = true } = {}) {
   };
 }
 
-function validateConfig(config, { requireIntegrations = false, requireRobustExtraction = false } = {}) {
+function validateConfig(config, { requireIntegrations = false, requireRobustExtraction = false, requireGoogleDocs = false } = {}) {
   const missing = [];
   const googleAuthOk = Boolean(
     config.google.serviceAccountJson ||
@@ -97,6 +97,9 @@ function validateConfig(config, { requireIntegrations = false, requireRobustExtr
   }
   if (requireRobustExtraction) {
     required.push(["FATHOM_API_KEY", config.fathom.apiKey]);
+  }
+  if (requireGoogleDocs) {
+    required.push(["GOOGLE_SERVICE_ACCOUNT_JSON or GOOGLE_SERVICE_ACCOUNT_JSON_B64", config.google.serviceAccountJson]);
   }
 
   for (const [name, value] of required) {
