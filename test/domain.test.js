@@ -150,6 +150,31 @@ test("clarification replies complete remove requests", () => {
   assert.equal(intent.removeDeal, true);
 });
 
+test("thread reply can mark Smartlead notification as not positive", () => {
+  const intent = buildClarifiedIntent(
+    [
+      {
+        bot_id: "B123",
+        text: [
+          "New positive Smartlead reply: *Sharpen*",
+          "cc: <@U1> <@U2>",
+          "Contact: Austin Rowe <ar@sharpencx.com>",
+          "Campaign: AI Eng Service | B2B Active Sales Motion | Sales Leaders",
+          "Reply: ##- Please type your reply above this line -## Hello Hayden, Thank you for your email. This is an automated response.",
+          "Tracker: Created lead, stage Replied Positive."
+        ].join("\n")
+      }
+    ],
+    "this was not positive"
+  );
+
+  assert.equal(intent.type, "remove_pipeline_records");
+  assert.equal(intent.company, "Sharpen");
+  assert.equal(intent.email, "ar@sharpencx.com");
+  assert.equal(intent.removeLead, true);
+  assert.equal(intent.removeDeal, false);
+});
+
 test("help replies in a failed thread do not replay the prior tracker action", () => {
   const intent = buildClarifiedIntent(
     [
@@ -1598,6 +1623,18 @@ test("Smartlead out-of-office reply is not positive even with assumePositive", (
     category: {
       name: "Out Of Office",
       sentiment_type: "neutral"
+    }
+  }, { assumePositive: true }), false);
+});
+
+test("Smartlead ticket autoresponder is not positive even with positive event type", () => {
+  assert.equal(isPositiveReply({
+    event_type: "positive_reply",
+    lead_email: "ar@sharpencx.com",
+    reply_body: "##- Please type your reply above this line -## Hello Hayden, Thank you for your email. This is an automated response. We are in receipt of your request and the following ticket has been opened.",
+    category: {
+      name: "Interested",
+      sentiment_type: "positive"
     }
   }, { assumePositive: true }), false);
 });
